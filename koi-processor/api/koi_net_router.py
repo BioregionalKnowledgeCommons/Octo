@@ -47,6 +47,7 @@ from api.koi_protocol import (
     WireManifest,
     timestamp_to_z_format,
 )
+from api.koi_poller import KOIPoller
 from api.koi_envelope import (
     EnvelopeError,
     is_signed_envelope,
@@ -66,11 +67,12 @@ _private_key = None
 _node_profile: Optional[NodeProfile] = None
 _event_queue: Optional[EventQueue] = None
 _db_pool: Optional[asyncpg.Pool] = None
+_poller: Optional[KOIPoller] = None
 
 
 async def setup_koi_net(pool: asyncpg.Pool):
     """Initialize KOI-net subsystem. Called from app startup."""
-    global _private_key, _node_profile, _event_queue, _db_pool
+    global _private_key, _node_profile, _event_queue, _db_pool, _poller
     _db_pool = pool
 
     node_name = os.getenv("KOI_NODE_NAME", "octo-salish-sea")
@@ -82,7 +84,24 @@ async def setup_koi_net(pool: asyncpg.Pool):
         node_type="FULL",
     )
     _event_queue = EventQueue(pool, _node_profile.node_rid)
+
+    # Start background poller
+    _poller = KOIPoller(
+        pool=pool,
+        node_rid=_node_profile.node_rid,
+        private_key=_private_key,
+    )
+    await _poller.start()
+
     logger.info(f"KOI-net initialized: {_node_profile.node_rid}")
+
+
+async def shutdown_koi_net():
+    """Stop poller and clean up. Called from app shutdown."""
+    global _poller
+    if _poller:
+        await _poller.stop()
+        _poller = None
 
 
 # =============================================================================

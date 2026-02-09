@@ -60,18 +60,21 @@ echo "[3] Registering test practice in GV..."
 TIMESTAMP=$(date -u +%Y%m%d%H%M%S)
 TEST_NAME="Federation Test Practice ${TIMESTAMP}"
 
+VAULT_RID="vault-fed-test-${TIMESTAMP}"
 RESULT=$(curl -s -X POST "${GV_URL}/register-entity" \
     -H "Content-Type: application/json" \
     -d "{
         \"name\": \"${TEST_NAME}\",
         \"entity_type\": \"Practice\",
-        \"source\": \"federation-test\"
+        \"vault_rid\": \"${VAULT_RID}\",
+        \"vault_path\": \"Practices/FederationTest-${TIMESTAMP}.md\",
+        \"content_hash\": \"fedtest-${TIMESTAMP}\"
     }")
 
 echo "  Result: ${RESULT}" | head -c 200
 echo ""
 
-ENTITY_URI=$(echo "$RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('uri',''))" 2>/dev/null)
+ENTITY_URI=$(echo "$RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('canonical_uri',''))" 2>/dev/null)
 echo "  Entity URI: ${ENTITY_URI}"
 
 if [ -z "$ENTITY_URI" ]; then

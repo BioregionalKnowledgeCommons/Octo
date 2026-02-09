@@ -975,8 +975,14 @@ async def startup():
 
 @app.on_event("shutdown")
 async def shutdown():
-    """Close database connection pool"""
+    """Stop background tasks and close database connection pool"""
     global db_pool
+    if KOI_NET_ENABLED:
+        try:
+            from api.koi_net_router import shutdown_koi_net
+            await shutdown_koi_net()
+        except Exception as e:
+            logger.warning(f"KOI-net shutdown error: {e}")
     if db_pool:
         await db_pool.close()
 
@@ -1922,6 +1928,42 @@ async def register_vault_entity(request: RegisterEntityRequest):
                         logger.info(f"Promoted {pending_promoted} pending relationship(s)")
                 except Exception as e:
                     logger.warning(f"Failed to resolve pending relationships: {e}")
+
+            # Emit KOI-net event if enabled
+            if KOI_NET_ENABLED:
+                try:
+                    from api.koi_net_router import _event_queue
+                    if _event_queue:
+                        # Generate koi_rid if not yet set
+                        koi_rid = await conn.fetchval(
+                            "SELECT koi_rid FROM entity_registry WHERE fuseki_uri = $1",
+                            canonical.uri,
+                        )
+                        if not koi_rid:
+                            import hashlib, re
+                            slug = re.sub(r"[^\w\s-]", "", request.name.lower().strip())
+                            slug = re.sub(r"[\s_]+", "-", slug).strip("-") or "unnamed"
+                            uri_hash = hashlib.sha256(canonical.uri.encode()).hexdigest()[:16]
+                            type_lower = request.entity_type.lower()
+                            koi_rid = f"orn:koi-net.{type_lower}:{slug}+{uri_hash}"
+                            await conn.execute(
+                                "UPDATE entity_registry SET koi_rid = $1 WHERE fuseki_uri = $2",
+                                koi_rid, canonical.uri,
+                            )
+                        event_type = "NEW" if is_new else "UPDATE"
+                        await _event_queue.add(
+                            rid=koi_rid,
+                            event_type=event_type,
+                            contents={
+                                "name": request.name,
+                                "@type": f"bkc:{request.entity_type}",
+                                "entity_type": request.entity_type,
+                                "source": "vault",
+                            },
+                        )
+                        logger.info(f"KOI-net event emitted: {event_type} {koi_rid}")
+                except Exception as e:
+                    logger.warning(f"Failed to emit KOI-net event: {e}")
 
             return RegisterEntityResponse(
                 success=True,
