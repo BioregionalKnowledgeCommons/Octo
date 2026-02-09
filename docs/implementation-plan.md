@@ -475,10 +475,10 @@ esac
 
 **Reference implementations:**
 - RegenAI coordinator: `~/projects/regenai/koi-sensors/koi_protocol/coordinator/koi_coordinator.py`
-- BlockScience koi-net: `~/projects/RegenAI/koi-research/sources/blockscience/koi-net/`
+- BlockScience [koi-net](https://github.com/BlockScience/koi-net): `~/projects/RegenAI/koi-research/sources/blockscience/koi-net/`
 - Interop test: `~/projects/regenai/koi-sensors/scripts/koi_net_interop_test.py`
 
-**Key dependency:** `rid-lib` (v3.2.8+) from BlockScience. Provides RID, RIDType, Manifest, Bundle, and `sha256_hash()` using JCS (JSON Canonicalization Scheme). Reimplementing JCS hashing is error-prone and breaks interop. Add as a Python dependency.
+**Key dependency:** [`rid-lib`](https://github.com/BlockScience/rid-lib) (v3.2.8+) from BlockScience. Provides RID, RIDType, Manifest, Bundle, and `sha256_hash()` using JCS (JSON Canonicalization Scheme). Reimplementing JCS hashing is error-prone and breaks interop. Add as a Python dependency.
 
 ### 3.1 Feature Flag
 
@@ -1249,7 +1249,7 @@ pyyaml>=6.0           # Sensor config parsing
 watchdog>=4.0         # File system monitoring (markdown sensor)
 ```
 
-> **Note:** `rid-lib` uses JCS (JSON Canonicalization Scheme) for deterministic hashing of knowledge objects. This is not the same as `hashlib.sha256(json.dumps(...))`. Using the canonical library prevents interop failures with other KOI-net nodes.
+> **Note:** [`rid-lib`](https://github.com/BlockScience/rid-lib) uses JCS (JSON Canonicalization Scheme) for deterministic hashing of knowledge objects. This is not the same as `hashlib.sha256(json.dumps(...))`. Using the canonical library prevents interop failures with other KOI-net nodes.
 
 ### Existing Dependencies (already in use)
 - `fastapi`, `uvicorn` — API framework

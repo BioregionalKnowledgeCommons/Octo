@@ -541,9 +541,9 @@ If accepted, the updated ontology propagates through the network via KOI-net eve
 - Andreotti, V. Epistemic justice and modernity/coloniality.
 
 ### Knowledge Sovereignty
-- Flores, W. et al. "A Framework for Kara-Kichwa Data Sovereignty." arXiv:2601.06634.
+- Flores, W. et al. ["A Framework for Kara-Kichwa Data Sovereignty."](https://arxiv.org/abs/2601.06634) arXiv:2601.06634.
 - Yunkaporta, T. & Goodchild, M. "Protocols for Non-Indigenous People Working with Indigenous Knowledge."
-- OCAP Principles: Ownership, Control, Access, Possession (First Nations Information Governance Centre).
+- [OCAP Principles](https://fnigc.ca/ocap-training/): Ownership, Control, Access, Possession (First Nations Information Governance Centre).
 
 ### Technical
 - BKC Ontology: `ontology/bkc-ontology.jsonld`

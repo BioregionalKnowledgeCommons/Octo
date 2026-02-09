@@ -12,7 +12,7 @@ Knowledge commons should mirror this structure. The practices of herring monitor
 
 What we need is a **holonic architecture** — where each bioregional knowledge commons is a whole unto itself (autonomous, self-governing, place-specific) and simultaneously a part of something larger (connected, pattern-sharing, federated). Arthur Koestler coined the term "holon" for exactly this: something that is both a whole and a part, depending on the scale at which you observe it.
 
-KOI — Knowledge Organization Infrastructure — provides the technical foundation for this. Built by BlockScience, the KOI-net protocol has a remarkable property: **a network of KOI nodes can itself function as a single node to the outside world**. This fractal composition means we can build knowledge commons at every bioregional scale, each internally complex and externally coherent, nesting within each other like watersheds within watersheds.
+KOI — Knowledge Organization Infrastructure — provides the technical foundation for this. Built by [BlockScience](https://github.com/BlockScience/koi), the [KOI-net](https://github.com/BlockScience/koi-net) protocol has a remarkable property: **a network of KOI nodes can itself function as a single node to the outside world**. This fractal composition means we can build knowledge commons at every bioregional scale, each internally complex and externally coherent, nesting within each other like watersheds within watersheds.
 
 This document maps the path from where we are today — a single bioregional agent running on a VPS — to a global web of federated bioregional knowledge commons.
 
@@ -55,7 +55,7 @@ The coordinator node (`koi_coordinator.py`) implements the full KOI-net protocol
 
 ### Personal KOI — Individual Knowledge Management
 
-The personal-koi-mcp server wraps a local KOI backend for personal knowledge management through Claude Code:
+The [personal-koi-mcp](https://github.com/DarrenZal/personal-koi-mcp) server wraps a local KOI backend for personal knowledge management through Claude Code:
 
 - **13,400+ emails** indexed with semantic search
 - **260+ Claude sessions** searchable
@@ -81,11 +81,11 @@ Each uses the same core infrastructure (KOI API, entity resolution, relationship
 
 ## 3. KOI-net: The Protocol
 
-KOI-net is a protocol for **heterogeneous compositions of KOI nodes** that can autonomously input, process, and output knowledge — both independently and when wired together. It was designed by BlockScience and builds on the RID (Reference Identifier) protocol.
+KOI-net is a protocol for **heterogeneous compositions of KOI nodes** that can autonomously input, process, and output knowledge — both independently and when wired together. It was designed by [BlockScience](https://github.com/BlockScience/koi) and builds on the [RID](https://github.com/BlockScience/rid-lib) (Reference Identifier) protocol.
 
 ### RIDs: The Universal Reference System
 
-The foundation of KOI is a careful distinction between **references** and **referents**. As Orion Reed articulates in "Objects as Reference":
+The foundation of KOI is a careful distinction between **references** and **referents**. As Orion Reed articulates in ["Objects as Reference"](https://blog.block.science/objects-as-reference-toward-robust-first-principles-of-digital-organization/):
 
 > "A relation between a reference (a thing which refers) and a referent (a thing referred to)."
 
@@ -204,7 +204,7 @@ Edge profiles control **what RID types flow between nodes** — a bioregional ag
 
 ## 4. The Holon Pattern
 
-The most profound property of KOI-net is fractal composition. From the BlockScience research on "A Language for Knowledge Networks":
+The most profound property of KOI-net is fractal composition. From the BlockScience research on ["A Language for Knowledge Networks"](https://blog.block.science/a-language-for-knowledge-networks/):
 
 > "KOI-nets can have a fractal-like structure, insofar as a given KOI-net can also function as a single node in a larger KOI-net (if it is viewed from an external perspective)."
 
@@ -253,7 +253,7 @@ This maps directly to the OCAP principles (Ownership, Control, Access, Possessio
 
 ### The Neuroscience Analogy
 
-David Sisson's "KOI Nodes as Neurons" provides a powerful framing through four levels of cognitive sophistication:
+David Sisson's ["KOI Nodes as Neurons"](https://blog.block.science/koi-nodes-as-neurons/) provides a powerful framing through four levels of cognitive sophistication:
 
 **Sensation** — Raw sensory input from the observed world, processed through a node to produce conceptual output. A sensor node detecting a new web page or document.
 
@@ -597,7 +597,7 @@ The Practices & Patterns Project has its own technical trajectory:
 
 **Databases:** Multiple, pluralistic. Andrea Farias is already supporting learning networks like Commonland and Bioregional Weaving Lab in creating their own databases (custom-built and Notion-based). The project's goal is explicitly *not* to create a single tool or approach, but to support "federated pluralistic knowledge bases, enabling cross-network discovery and learning."
 
-**Interoperability:** The project is exploring protocols like **Murmurations** — a protocol that indexes and shares public data so it can be discovered and used across independent knowledge bases. This aligns with the same philosophy as KOI-net: federation over consolidation, shared discovery without shared databases.
+**Interoperability:** The project is exploring protocols like **[Murmurations](https://murmurations.network/)** — a protocol that indexes and shares public data so it can be discovered and used across independent knowledge bases. This aligns with the same philosophy as KOI-net: federation over consolidation, shared discovery without shared databases.
 
 **Advanced interfaces:** The project envisions input mechanisms for practitioners to contribute without technical expertise, and has experimented with an AI chatbot for navigating the knowledge base.
 
@@ -801,12 +801,12 @@ This mirrors how bioregions actually work. The salmon runs are local — they na
 ## References
 
 ### BlockScience KOI Research
-- Sisson, D. "KOI Nodes as Neurons." BlockScience, 2025.
-- Reed, O. "Objects as Reference." BlockScience, 2025.
-- "A Language for Knowledge Networks." BlockScience, 2025.
-- "Architecting KOI." BlockScience, 2025.
-- KOI-net reference implementation: `koi-net/src/koi_net/`
-- RID library: `rid-lib/`
+- Sisson, D. ["KOI Nodes as Neurons."](https://blog.block.science/koi-nodes-as-neurons/) BlockScience, 2025.
+- Reed, O. ["Objects as Reference."](https://blog.block.science/objects-as-reference-toward-robust-first-principles-of-digital-organization/) BlockScience, 2025.
+- ["A Language for Knowledge Networks."](https://blog.block.science/a-language-for-knowledge-networks/) BlockScience, 2025.
+- ["Architecting KOI."](https://blog.block.science/architecting-knowledge-organization-infrastructure/) BlockScience, 2025.
+- KOI-net reference implementation: [`koi-net`](https://github.com/BlockScience/koi-net)
+- RID library: [`rid-lib`](https://github.com/BlockScience/rid-lib)
 
 ### BKC CoIP
 - Farias, A. "Bioregional Knowledge Commons — A Meta Perspective." r3.0, 2025.
@@ -815,7 +815,7 @@ This mirrors how bioregions actually work. The salmon runs are local — they na
 - Ostrom, E. *Governing the Commons.* 1990.
 
 ### Knowledge Sovereignty
-- Flores, W. et al. "A Framework for Kara-Kichwa Data Sovereignty." arXiv:2601.06634.
+- Flores, W. et al. ["A Framework for Kara-Kichwa Data Sovereignty."](https://arxiv.org/abs/2601.06634) arXiv:2601.06634.
 - Yunkaporta, T. & Goodchild, M. "Protocols for Non-Indigenous People Working with Indigenous Knowledge."
 
 ### Technical
