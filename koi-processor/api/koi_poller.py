@@ -262,7 +262,7 @@ class KOIPoller:
                     local_uri = row["fuseki_uri"]
                     confidence = 1.0
 
-        # Create cross-reference (idempotent via ON CONFLICT)
+        # Create or update cross-reference
         async with self.pool.acquire() as conn:
             if local_uri:
                 relationship = "same_as" if confidence == 1.0 else "related_to"
@@ -272,19 +272,34 @@ class KOIPoller:
                 relationship = "unresolved"
                 confidence = 0.0
 
-            await conn.execute(
-                """
-                INSERT INTO koi_net_cross_refs
-                    (local_uri, remote_rid, remote_node, relationship, confidence)
-                VALUES ($1, $2, $3, $4, $5)
-                ON CONFLICT (local_uri, remote_rid) DO NOTHING
-                """,
-                local_uri,
-                rid,
-                source_node,
-                relationship,
-                confidence,
+            # Check for existing cross-ref by remote_rid (may be unresolved)
+            existing = await conn.fetchrow(
+                "SELECT id, local_uri, relationship FROM koi_net_cross_refs WHERE remote_rid = $1 AND remote_node = $2",
+                rid, source_node,
             )
+
+            if existing:
+                if existing["relationship"] == "unresolved" and relationship != "unresolved":
+                    # Upgrade from unresolved to resolved
+                    await conn.execute(
+                        "UPDATE koi_net_cross_refs SET local_uri = $1, relationship = $2, confidence = $3 WHERE id = $4",
+                        local_uri, relationship, confidence, existing["id"],
+                    )
+                    logger.info(f"Upgraded cross-ref {rid}: unresolved -> {relationship}")
+                # else: already exists with same or better resolution, skip
+            else:
+                await conn.execute(
+                    """
+                    INSERT INTO koi_net_cross_refs
+                        (local_uri, remote_rid, remote_node, relationship, confidence)
+                    VALUES ($1, $2, $3, $4, $5)
+                    """,
+                    local_uri,
+                    rid,
+                    source_node,
+                    relationship,
+                    confidence,
+                )
 
         logger.info(
             f"Cross-ref: {rid} -> {local_uri} ({relationship}, conf={confidence})"
@@ -310,17 +325,21 @@ class KOIPoller:
             request_body = confirm_payload
             request_body["node_id"] = self.node_rid
 
+        confirm_url = f"{base_url}/koi-net/events/confirm"
+        logger.debug(f"Confirming {len(event_ids)} events at {confirm_url}: {event_ids}")
+
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.post(
-                    f"{base_url}/koi-net/events/confirm", json=request_body
-                )
+                resp = await client.post(confirm_url, json=request_body)
             if resp.status_code == 200:
-                logger.info(f"Confirmed {len(event_ids)} events with {source_node}")
+                result = resp.json()
+                logger.info(
+                    f"Confirmed {len(event_ids)} events with {source_node}: {result}"
+                )
             else:
                 logger.warning(
-                    f"Confirm failed: HTTP {resp.status_code} from {source_node}"
+                    f"Confirm failed: HTTP {resp.status_code} from {source_node}: {resp.text}"
                 )
         except Exception as e:
             # Confirm failure is harmless — events will re-deliver
-            logger.debug(f"Confirm call failed for {source_node}: {e}")
+            logger.warning(f"Confirm call failed for {source_node}: {e}")

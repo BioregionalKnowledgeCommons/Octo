@@ -42,6 +42,7 @@ class WireEvent(BaseModel):
 
     rid: str
     event_type: EventType
+    event_id: Optional[str] = None
     manifest: Optional[WireManifest] = None
     contents: Optional[Dict[str, Any]] = None
 
@@ -108,7 +109,7 @@ class HandshakeRequest(BaseModel):
 
 
 class ConfirmEventsRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
     type: Literal["confirm_events"] = "confirm_events"
     event_ids: List[str]
 

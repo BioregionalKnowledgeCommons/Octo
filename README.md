@@ -4,7 +4,7 @@
 
 Octo is an AI agent built on [OpenClaw](https://github.com/openclaw/openclaw) that serves as an organ of perception for the Salish Sea bioregion. It combines a knowledge graph backend with a formal ontology for bioregional knowledge commoning — enabling it to reason about practices, patterns, discourse, and the relationships between them.
 
-Octo is also a **KOI-net federation coordinator** — it aggregates knowledge from leaf-node agents (Greater Victoria, Gulf Islands, etc.) into a unified Salish Sea knowledge commons using the [KOI-net protocol](https://github.com/BlockScience/koi-net) for authenticated, event-driven federation.
+Octo is also a **KOI-net federation coordinator** — it aggregates knowledge from leaf-node agents (Greater Victoria, Cowichan Valley, etc.) into a unified Salish Sea knowledge commons using the [KOI-net protocol](https://github.com/BlockScience/koi-net) for authenticated, event-driven federation.
 
 ## What Octo Does
 
@@ -23,11 +23,15 @@ The [Salish Sea Knowledge Garden](https://github.com/DarrenZal/salish-sea-garden
 ### Holonic Network
 
 ```
-[Greater Victoria]   [Gulf Islands]        ← leaf nodes (bioregional agents)
+[Greater Victoria]   [Cowichan Valley]      ← leaf nodes (bioregional agents)
         ↘                 ↙
    [Octo / Salish Sea Coordinator]         ← federation coordinator
               ↓
       [Cascadia Coordinator]               ← future meta-coordinator
+
+                                            [Front Range]
+                                                ↑ separate bioregional network
+                                                (peer of Cascadia, not under it)
 ```
 
 Each node runs the same KOI API codebase with its own database, vault, and identity. Nodes exchange events via the KOI-net protocol — when a practice is registered in Greater Victoria, it appears as a cross-reference in Octo within seconds.

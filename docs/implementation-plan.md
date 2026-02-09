@@ -1,6 +1,6 @@
 # Holonic Bioregional Knowledge Commons — Implementation Plan
 
-*Concrete engineering plan for building a three-level holonic network: Greater Victoria → Salish Sea (Octo) → Cascadia.*
+*Concrete engineering plan for building a holonic network: Greater Victoria + Cowichan Valley → Salish Sea (Octo) → Cascadia, with Front Range as a separate bioregional peer.*
 
 **Strategy document:** [holonic-bioregional-knowledge-commons.md](./holonic-bioregional-knowledge-commons.md)
 **Ontological architecture:** [ontological-architecture.md](./ontological-architecture.md)
@@ -12,11 +12,15 @@
 ### Three-Level Holon
 
 ```
-[Greater Victoria]   [Gulf Islands / Phase 4.5]
-        ↘                     ↙
+[Greater Victoria]   [Cowichan Valley]
+        ↘                 ↙
    [Octo / Salish Sea Coordinator]     ← holon boundary
               ↓
       [Cascadia Coordinator]           ← sees "Salish Sea" as one node
+
+                                       [Front Range]
+                                           ↑ separate bioregional network
+                                           (peer of Cascadia, not under it)
 ```
 
 ### Infrastructure (Single VPS)
@@ -27,8 +31,9 @@ All agents run on the existing VPS (`45.132.245.30`, 4 vCPU / 8GB RAM / 247GB di
 |-------|----------|-------------|------------|--------|
 | **Octo** (Salish Sea) | `octo_koi` | 8351 | `~/.openclaw/workspace/vault/` | Existing |
 | **Greater Victoria** | `gv_koi` | 8352 | `/root/gv-agent/vault/` | Phase 2 |
-| **Gulf Islands** (or similar) | `gi_koi` | 8354 | `/root/gi-agent/vault/` | Phase 4.5 |
+| **Cowichan Valley** | `cv_koi` | 8354 | `/root/cv-agent/vault/` | Phase 4.5 |
 | **Cascadia** | `cascadia_koi` | 8353 | `/root/cascadia-agent/vault/` | Phase 5 |
+| **Front Range** | `fr_koi` | 8355 | `/root/fr-agent/vault/` | Phase 5.5 |
 
 ### Shared PostgreSQL Container
 
@@ -286,7 +291,7 @@ Community-led monitoring of Pacific herring spawning...
 # Usage: ./create-additional-dbs.sh [db_name ...]
 # Examples:
 #   ./create-additional-dbs.sh gv_koi cascadia_koi    # Phase 2
-#   ./create-additional-dbs.sh gi_koi                  # Phase 4.5
+#   ./create-additional-dbs.sh cv_koi                  # Phase 4.5
 #   ./create-additional-dbs.sh                         # No args = default set
 
 CONTAINER="regen-koi-postgres"
@@ -439,8 +444,9 @@ if [ ! -f "$AGENTS_CONF" ]; then
   cat > "$AGENTS_CONF" <<EOF
 octo:koi-api:8351
 greater-victoria:gv-koi-api:8352
-# gulf-islands:gi-koi-api:8354    # Uncomment for Phase 4.5
+# cowichan-valley:cv-koi-api:8354  # Uncomment for Phase 4.5
 # cascadia:cascadia-koi-api:8353  # Uncomment for Phase 5
+# front-range:fr-koi-api:8355    # Separate bioregional network
 EOF
 fi
 
@@ -988,7 +994,7 @@ This checkpoint is a gate, not a note. Do not proceed to Phase 4.5 without passi
 
 ---
 
-## Phase 4.5: Second Leaf Node (Gulf Islands or Nanaimo)
+## Phase 4.5: Second Leaf Node (Cowichan Valley)
 
 **Goal:** Add a second leaf node under Octo to prove horizontal federation and genuine aggregation at the coordinator level.
 
@@ -996,35 +1002,35 @@ This checkpoint is a gate, not a note. Do not proceed to Phase 4.5 without passi
 
 **Depends on:** Resource Checkpoint passing.
 
-**Candidate bioregions:** Gulf Islands (strong ecological identity, separate from GV), Nanaimo / mid-island (distinct watershed), or Cowichan Valley.
+**Bioregion:** Cowichan Valley — distinct watershed and ecological identity, separate from Greater Victoria, with strong community monitoring traditions.
 
 ### Setup
 
 Follow the same pattern as Phase 2 (GV agent):
-- Database: `gi_koi` (or `nanaimo_koi`)
+- Database: `cv_koi`
 - Port: 8354
-- Config: `/root/gi-agent/config/gi.env`
-- Systemd: `gi-koi-api.service`
+- Config: `/root/cv-agent/config/cv.env`
+- Systemd: `cv-koi-api.service`
 - Vault: Seed with 2-3 local practices distinct from GV's
 
 ### Federation
 
-- Configure edges: GI ↔ Octo (same pattern as GV ↔ Octo)
+- Configure edges: CV ↔ Octo (same pattern as GV ↔ Octo)
 - Enable `KOI_NET_ENABLED=true`
-- Test: GI documents a practice → Octo receives from both GV and GI
+- Test: CV documents a practice → Octo receives from both GV and CV
 - Verify: Octo's event queue contains events from both leaf nodes
 
 ### Tasks
 
-- [ ] Choose bioregion and create agent (same pattern as Phase 2.2)
-- [ ] Create database: `./create-additional-dbs.sh gi_koi`
+- [ ] Create agent directory and config (same pattern as Phase 2.2)
+- [ ] Create database: `./create-additional-dbs.sh cv_koi`
 - [ ] Seed vault with 2-3 unique practices
 - [ ] Configure edges to Octo
-- [ ] Test horizontal federation: both GV and GI events arrive at Octo
+- [ ] Test horizontal federation: both GV and CV events arrive at Octo
 - [ ] Verify entity cross-references work across three agents
 
 **Test criteria:**
-- Octo receives events from both GV and GI independently
+- Octo receives events from both GV and CV independently
 - Cross-agent entity resolution works between all three agents
 - No event duplication or cross-contamination between leaf nodes
 
@@ -1131,7 +1137,42 @@ This is the initial version — full pattern mining is Phase 6.
 
 ---
 
-## Phase 5.5: Error Handling & Failure Modes
+## Phase 5.5: Front Range (Peer Network)
+
+**Goal:** Establish the Front Range as a separate bioregional network that peers with Cascadia — proving inter-network federation beyond the Salish Sea holon.
+
+**Why needed:** Front Range is NOT a leaf under Cascadia. It's a distinct bioregional network with its own coordinator and leaf nodes. Federation between Cascadia and Front Range happens at the coordinator level, demonstrating that the holon pattern scales horizontally across bioregions.
+
+**Depends on:** Phase 5 (Cascadia Coordinator) working.
+
+### Setup
+
+- Database: `fr_koi`
+- Port: 8355
+- Config: `/root/fr-agent/config/fr.env`
+- Systemd: `fr-koi-api.service`
+- Node name: `front-range-coordinator`
+
+### Federation
+
+- Peer edges: Cascadia ↔ Front Range (bidirectional POLL, coordinator-to-coordinator)
+- NOT hierarchical — neither is "above" the other
+- Each network maintains its own holon boundary
+- Shared ontology ensures cross-network entity resolution
+
+### Tasks
+
+- [ ] Create Front Range agent directory and config
+- [ ] Create database: `./create-additional-dbs.sh fr_koi`
+- [ ] Write workspace files (IDENTITY.md with Front Range context)
+- [ ] Seed vault with Front Range-specific practices
+- [ ] Configure peer edges: Cascadia ↔ Front Range
+- [ ] Test: Practice registered in Front Range appears as cross-reference in Cascadia
+- [ ] Verify: Practices do NOT flow from Front Range → Octo (holon boundary)
+
+---
+
+## Phase 5.6: Error Handling & Failure Modes
 
 **Goal:** Before opening the network to external nodes, design and implement error handling for cross-node failure scenarios.
 
@@ -1308,9 +1349,9 @@ Resolved based on review feedback, with reasoning:
 
 2. **Shared vs. separate embedding keys? → Shared key, tag requests for cost tracking.** Tag each embedding request with the agent name via custom metadata. Cost visibility without managing multiple API keys. Separate keys only matter if billing different organizations.
 
-3. **Edge negotiation automation? → After Phase 5, before external deployment.** Manual edges work for 3-4 nodes on one VPS. Automate via handshake before anyone outside our control connects. This is effectively a Phase 5.5 task.
+3. **Edge negotiation automation? → After Phase 5, before external deployment.** Manual edges work for 3-4 nodes on one VPS. Automate via handshake before anyone outside our control connects. This is effectively a Phase 5.6 task.
 
-4. **Second leaf node? → Phase 4.5 (Gulf Islands or Nanaimo).** Added to plan. Two leaf nodes under one coordinator is the minimum viable test of the holon pattern — with one leaf, Cascadia just sees Octo, not a network.
+4. **Second leaf node? → Phase 4.5 (Cowichan Valley).** Added to plan. Two leaf nodes under one coordinator is the minimum viable test of the holon pattern — with one leaf, Cascadia just sees Octo, not a network.
 
 5. **Coordinator separation? → Keep merged, separate when resource-constrained.** The dual-role is simpler to deploy and debug. The code is structured so separation is a config change (different env file, different port, different endpoints enabled), not an architectural rewrite. Separate when adding a second leaf causes resource pressure or if entity count exceeds ~500.
 

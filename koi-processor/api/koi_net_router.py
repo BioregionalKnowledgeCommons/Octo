@@ -304,6 +304,7 @@ async def events_poll(request: Request):
         wire_events.append({
             "rid": ev["rid"],
             "event_type": ev["event_type"],
+            "event_id": ev.get("event_id"),
             "manifest": manifest,
             "contents": ev.get("contents"),
         })

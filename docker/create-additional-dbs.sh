@@ -3,7 +3,7 @@
 # Usage: ./create-additional-dbs.sh [db_name ...]
 # Examples:
 #   ./create-additional-dbs.sh gv_koi cascadia_koi    # Phase 2
-#   ./create-additional-dbs.sh gi_koi                  # Phase 4.5
+#   ./create-additional-dbs.sh cv_koi                  # Phase 4.5
 #   ./create-additional-dbs.sh                         # No args = default set
 
 CONTAINER="regen-koi-postgres"
@@ -18,13 +18,15 @@ create_koi_db() {
   # Extensions must be created per-database
   $PSQL -d "$DB_NAME" <<EOF
 CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS age;
 CREATE EXTENSION IF NOT EXISTS fuzzystrmatch;
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 EOF
 
-  # AGE requires LOAD per session
-  $PSQL -d "$DB_NAME" -c "LOAD 'age'; SET search_path = ag_catalog, \"\$user\", public; SELECT create_graph('regen_graph');"
+  # AGE requires LOAD per session — separate commands
+  $PSQL -d "$DB_NAME" -c "LOAD 'age';"
+  $PSQL -d "$DB_NAME" -c "SET search_path = ag_catalog, \"\$user\", public; SELECT create_graph('regen_graph');"
 
   # Bootstrap predicates
   echo "Bootstrapping predicates for $DB_NAME..."

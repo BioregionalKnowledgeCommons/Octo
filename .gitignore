@@ -26,3 +26,7 @@ credentials/
 
 # Backups
 backups/
+
+# Claude Code session files
+**/CLAUDE.md
+!CLAUDE.md
