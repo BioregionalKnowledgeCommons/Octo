@@ -220,8 +220,8 @@ All databases share one PostgreSQL container (`regen-koi-postgres`) with pgvecto
 
 | Database | Agent | Entities |
 |----------|-------|----------|
-| `octo_koi` | Octo (Salish Sea) | 57 |
-| `gv_koi` | Greater Victoria | 4 |
+| `octo_koi` | Octo (Salish Sea) | 70 |
+| `gv_koi` | Greater Victoria | 5 |
 
 ### Key tables (per database)
 
@@ -301,3 +301,56 @@ The source files in this repo map to server paths:
 | `~/projects/regenai/koi-processor/` | Full KOI processor (superset of what's deployed here) |
 | `~/projects/personal-koi-mcp/` | Personal KOI MCP server (TypeScript) |
 | `~/Documents/Notes/Ontology/` | Local vault ontology schemas |
+
+## Current Status
+
+**Date:** 2026-02-08
+**Status:** HEALTHY — Cleanup sprint complete, ready for multi-agent expansion
+
+### What's Done
+- Sprints 1-3 deployed: KOI-net federation working between Octo (coordinator) and GV (leaf)
+- Cleanup sprint: fixed AGE extension bug, ensure_schema columns, event confirmation flow, cross-ref upgrade logic
+- 70 entities in Octo (including 2 Practices, seeded via `seed-vault-entities.sh`)
+- Cross-reference resolution verified: Herring Monitoring = `same_as` (confidence 1.0)
+- Interop tests 8/8 passing, federation test passing, both agents healthy (14% RAM)
+- Architecture updated: Gulf Islands → Cowichan Valley, Front Range added as peer network
+- All changes committed and pushed to GitHub (commit `307ca15`)
+
+### What's Left
+1. **Tomorrow: Launch Cowichan Valley + Front Range agents** — create agent dirs, databases, workspace files, systemd services, configure edges, test cross-references
+2. **Phase 0.5: BKC CoIP vault audit** — blocked on access from Andrea Farias / Vincent Arena
+3. **Phase 5: Cascadia coordinator** — after CV is running, proves holon pattern
+
+### Open Questions
+- Front Range: connect to Octo directly for now (since Cascadia doesn't exist yet) or wait for Cascadia?
+- What practices will CV and FR friends seed? (they should prepare 2-3 each)
+
+### Adding a New Agent (Quick Reference)
+
+```bash
+# 1. Create database
+ssh root@45.132.245.30 "bash ~/koi-stack/create-additional-dbs.sh cv_koi"
+
+# 2. Create agent directory (follow gv-agent/ pattern)
+ssh root@45.132.245.30 "mkdir -p ~/cv-agent/{config,workspace,vault}"
+
+# 3. Create env file (copy gv.env, change DB_NAME, port, node name)
+
+# 4. Create systemd service (copy gv-koi-api.service, change paths/ports)
+
+# 5. Generate identity + configure edges
+
+# 6. Seed entities
+bash ~/scripts/seed-vault-entities.sh http://127.0.0.1:8354 ~/cv-agent/vault
+
+# 7. Start and verify
+systemctl start cv-koi-api
+curl -s http://127.0.0.1:8354/health
+```
+
+## Session History
+
+| Session ID | Date | Scope | Key Work |
+|------------|------|-------|----------|
+| `eca2a0ec` | 2026-02-08 | Holonic infra | Strategy docs, implementation plan, SSH setup, hyperlinks |
+| `7aead4bb` | 2026-02-08 | Cleanup sprint | Fix deployment bugs, seed 70 entities, event_id confirm flow, architecture update (CV + FR) |
