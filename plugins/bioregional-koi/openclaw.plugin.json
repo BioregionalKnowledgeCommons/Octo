@@ -1,0 +1,21 @@
+{
+  "id": "bioregional-koi",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "apiEndpoint": {
+        "type": "string",
+        "default": "http://127.0.0.1:8351"
+      },
+      "vaultPath": {
+        "type": "string",
+        "default": "/root/.openclaw/workspace/vault"
+      }
+    }
+  },
+  "uiHints": {
+    "apiEndpoint": { "label": "KOI API Endpoint" },
+    "vaultPath": { "label": "Vault Path" }
+  }
+}

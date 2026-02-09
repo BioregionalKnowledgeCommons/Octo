@@ -1,0 +1,43 @@
+# PostgreSQL with pgvector and Apache AGE
+# Based on official PostgreSQL 15 with extensions for:
+# - pgvector: Vector similarity search
+# - Apache AGE: Graph database (Cypher queries)
+
+FROM postgres:15-bookworm
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    git \
+    postgresql-server-dev-15 \
+    libreadline-dev \
+    zlib1g-dev \
+    flex \
+    bison \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install pgvector
+RUN cd /tmp \
+    && git clone --branch v0.5.1 https://github.com/pgvector/pgvector.git \
+    && cd pgvector \
+    && make \
+    && make install \
+    && rm -rf /tmp/pgvector
+
+# Install Apache AGE
+RUN cd /tmp \
+    && git clone --branch release/PG15/1.5.0 https://github.com/apache/age.git \
+    && cd age \
+    && make \
+    && make install \
+    && rm -rf /tmp/age
+
+# Preload AGE shared library
+RUN echo "shared_preload_libraries = 'age'" >> /usr/share/postgresql/postgresql.conf.sample
+
+# Expose PostgreSQL port
+EXPOSE 5432
+
+# Health check
+HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=3 \
+    CMD pg_isready -U postgres || exit 1

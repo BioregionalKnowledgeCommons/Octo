@@ -1,0 +1,28 @@
+# Environment
+*.env
+!*.env.example
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+venv/
+*.egg-info/
+
+# Node
+node_modules/
+dist/
+build/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Credentials
+credentials/
+*.pem
+*.key
+
+# Backups
+backups/

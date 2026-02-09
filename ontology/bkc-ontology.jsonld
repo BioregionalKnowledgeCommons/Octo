@@ -1,0 +1,132 @@
+{
+  "@context": {
+    "bkc": "http://bkc.regen.network/ontology#",
+    "schema": "http://schema.org/",
+    "skos": "http://www.w3.org/2004/02/skos/core#",
+    "dcterms": "http://purl.org/dc/terms/",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "owl": "http://www.w3.org/2002/07/owl#",
+    "xsd": "http://www.w3.org/2001/XMLSchema#",
+    "broader": { "@id": "skos:broader", "@type": "@id" },
+    "narrower": { "@id": "skos:narrower", "@type": "@id" },
+    "related_to": { "@id": "skos:related", "@type": "@id" }
+  },
+  "@graph": [
+    {
+      "@id": "http://bkc.regen.network/ontology",
+      "@type": "owl:Ontology",
+      "rdfs:label": "BKC Ontology",
+      "rdfs:comment": "Bioregional Knowledge Commoning ontology for Octo's knowledge graph",
+      "owl:versionInfo": "1.0.0",
+      "dcterms:created": { "@type": "xsd:date", "@value": "2026-02-08" },
+      "dcterms:modified": { "@type": "xsd:date", "@value": "2026-02-08" }
+    },
+
+    { "@id": "bkc:Practice", "@type": "owl:Class",
+      "rdfs:label": "Practice",
+      "rdfs:comment": "A bioregional-specific activity, approach, or way of doing things" },
+
+    { "@id": "bkc:Pattern", "@type": "owl:Class",
+      "rdfs:label": "Pattern",
+      "rdfs:subClassOf": { "@id": "skos:Concept" },
+      "rdfs:comment": "A trans-bioregional generalization emerging from aggregated practices" },
+
+    { "@id": "bkc:CaseStudy", "@type": "owl:Class",
+      "rdfs:label": "Case Study",
+      "rdfs:subClassOf": { "@id": "schema:CreativeWork" },
+      "rdfs:comment": "A documented real-world example of a practice or pattern" },
+
+    { "@id": "bkc:Bioregion", "@type": "owl:Class",
+      "rdfs:label": "Bioregion",
+      "rdfs:subClassOf": [{ "@id": "schema:Place" }, { "@id": "skos:Concept" }],
+      "rdfs:comment": "A named bioregion — both spatial and conceptual, defined by ecological and cultural boundaries" },
+
+    { "@id": "bkc:Protocol", "@type": "owl:Class",
+      "rdfs:label": "Protocol",
+      "rdfs:subClassOf": { "@id": "schema:CreativeWork" },
+      "rdfs:comment": "A general coordination pattern, not locality-specific" },
+
+    { "@id": "bkc:Playbook", "@type": "owl:Class",
+      "rdfs:label": "Playbook",
+      "rdfs:subClassOf": { "@id": "schema:CreativeWork" },
+      "rdfs:comment": "A local implementation of a protocol in a specific context" },
+
+    { "@id": "bkc:Question", "@type": "owl:Class",
+      "rdfs:label": "Question",
+      "rdfs:comment": "An inquiry or hypothesis driving investigation" },
+
+    { "@id": "bkc:Claim", "@type": "owl:Class",
+      "rdfs:label": "Claim",
+      "rdfs:comment": "An assertion or conclusion" },
+
+    { "@id": "bkc:Evidence", "@type": "owl:Class",
+      "rdfs:label": "Evidence",
+      "rdfs:comment": "Data, observations, or results" },
+
+    { "@id": "bkc:aggregates_into", "@type": "owl:ObjectProperty",
+      "rdfs:label": "aggregates into",
+      "rdfs:domain": { "@id": "bkc:Practice" },
+      "rdfs:range": { "@id": "bkc:Pattern" },
+      "rdfs:comment": "Observational: practices aggregate into patterns. NOT inverse of suggests." },
+
+    { "@id": "bkc:suggests", "@type": "owl:ObjectProperty",
+      "rdfs:label": "suggests",
+      "rdfs:domain": { "@id": "bkc:Pattern" },
+      "rdfs:range": { "@id": "bkc:Practice" },
+      "rdfs:comment": "Prescriptive: patterns suggest new practices. NOT inverse of aggregates_into." },
+
+    { "@id": "bkc:documents", "@type": "owl:ObjectProperty",
+      "rdfs:label": "documents",
+      "rdfs:domain": { "@id": "bkc:CaseStudy" },
+      "rdfs:range": { "@id": "bkc:Practice" },
+      "rdfs:comment": "CaseStudy documents a Practice or Pattern. Range also includes bkc:Pattern. Inverse alias: documentedBy (parser only, not stored)." },
+
+    { "@id": "bkc:practiced_in", "@type": "owl:ObjectProperty",
+      "rdfs:label": "practiced in",
+      "rdfs:subPropertyOf": { "@id": "schema:location" },
+      "rdfs:domain": { "@id": "bkc:Practice" },
+      "rdfs:range": { "@id": "bkc:Bioregion" } },
+
+    { "@id": "bkc:supports", "@type": "owl:ObjectProperty",
+      "rdfs:label": "supports",
+      "rdfs:range": { "@id": "bkc:Claim" } },
+
+    { "@id": "bkc:opposes", "@type": "owl:ObjectProperty",
+      "rdfs:label": "opposes",
+      "rdfs:range": { "@id": "bkc:Claim" } },
+
+    { "@id": "bkc:informs", "@type": "owl:ObjectProperty",
+      "rdfs:label": "informs" },
+
+    { "@id": "bkc:generates", "@type": "owl:ObjectProperty",
+      "rdfs:label": "generates" },
+
+    { "@id": "bkc:implemented_by", "@type": "owl:ObjectProperty",
+      "rdfs:label": "implemented by",
+      "rdfs:domain": { "@id": "bkc:Protocol" },
+      "rdfs:range": { "@id": "bkc:Playbook" },
+      "rdfs:comment": "Protocol implemented by Playbook. Inverse alias: implements (parser only, not stored)." },
+
+    { "@id": "bkc:synthesizes", "@type": "owl:ObjectProperty",
+      "rdfs:label": "synthesizes",
+      "rdfs:domain": { "@id": "bkc:Claim" },
+      "rdfs:range": { "@id": "bkc:Evidence" } },
+
+    { "@id": "bkc:about", "@type": "owl:ObjectProperty",
+      "rdfs:label": "about",
+      "rdfs:subPropertyOf": { "@id": "dcterms:subject" },
+      "rdfs:comment": "Grounds discourse nodes to domain entities" },
+
+    { "@id": "bkc:forked_from", "@type": "owl:ObjectProperty",
+      "rdfs:label": "forked from",
+      "rdfs:comment": "Hyphal lineage: branched from" },
+
+    { "@id": "bkc:builds_on", "@type": "owl:ObjectProperty",
+      "rdfs:label": "builds on",
+      "rdfs:comment": "Hyphal lineage: develops from" },
+
+    { "@id": "bkc:inspired_by", "@type": "owl:ObjectProperty",
+      "rdfs:label": "inspired by",
+      "rdfs:comment": "Hyphal lineage: conceptual inspiration" }
+  ]
+}
