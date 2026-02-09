@@ -16,31 +16,67 @@ Octo is a bioregional knowledge commoning agent built on OpenClaw, deployed on a
 
 | Service | How it runs | Port | Details |
 |---------|------------|------|---------|
-| **KOI API** | systemd (`koi-api.service`) | 8351 (localhost) | uvicorn, Python 3.12 |
-| **PostgreSQL** | Docker (`regen-koi-postgres`) | 5432 (localhost) | pgvector + Apache AGE |
+| **Octo KOI API** | systemd (`koi-api.service`) | 8351 (localhost) | uvicorn, Python 3.12, KOI-net enabled |
+| **GV KOI API** | systemd (`gv-koi-api.service`) | 8352 (localhost) | Greater Victoria leaf node, KOI-net enabled |
+| **PostgreSQL** | Docker (`regen-koi-postgres`) | 5432 (localhost) | pgvector + Apache AGE, multiple DBs |
 | **OpenClaw** | OpenClaw runtime (v2026.2.2-3) | — | Telegram + Discord channels |
 | **Quartz** | nginx + cron rebuild | 80 | Static knowledge site |
 | **Octo Chat** | systemd (`octo-chat.service`) | 3847 (localhost) | Chat API → OpenClaw agent |
+
+### KOI-net Node Identities
+
+| Node | RID | Public Key (truncated) |
+|------|-----|----------------------|
+| **Octo** | `orn:koi-net.node:octo-salish-sea+50a3c9eac05c807f` | `MFkwEwYH...` |
+| **GV** | `orn:koi-net.node:greater-victoria+81ec47d80f231444` | `MFkwEwYH...` |
+
+Private keys stored at `/root/koi-state/{node_name}_private_key.pem`.
 
 ## File Layout on Server
 
 ```
 /root/
-├── koi-processor/              # KOI backend (Python)
+├── koi-processor/              # KOI backend (Python, shared by all agents)
 │   ├── api/
 │   │   ├── personal_ingest_api.py   # Main API (FastAPI/uvicorn)
 │   │   ├── entity_schema.py         # 15 entity types, resolution config
-│   │   └── vault_parser.py          # YAML→predicate mapping (27 predicates)
+│   │   ├── vault_parser.py          # YAML→predicate mapping (27 predicates)
+│   │   ├── koi_net_router.py        # KOI-net protocol endpoints (8 endpoints)
+│   │   ├── koi_envelope.py          # ECDSA P-256 signed envelopes
+│   │   ├── koi_poller.py            # Background federation poller
+│   │   ├── koi_protocol.py          # Wire format models (Pydantic)
+│   │   ├── event_queue.py           # DB-backed event queue
+│   │   └── node_identity.py         # Keypair + node RID generation
 │   ├── config/
-│   │   └── personal.env             # DB creds, OpenAI key, vault path
+│   │   └── personal.env             # Octo DB creds, OpenAI key, vault path
 │   ├── migrations/
-│   │   └── 038_bkc_predicates.sql   # BKC ontology predicates
+│   │   ├── 038_bkc_predicates.sql   # BKC ontology predicates
+│   │   ├── 039_koi_net_events.sql   # Event queue, edges, nodes tables
+│   │   ├── 039b_ontology_mappings.sql # Source schemas + ontology mappings
+│   │   ├── 040_entity_koi_rids.sql  # KOI RID column on entity_registry
+│   │   └── 041_cross_references.sql # Federation cross-references
+│   ├── scripts/
+│   │   └── backfill_koi_rids.py     # One-time RID backfill
+│   ├── tests/
+│   │   └── test_koi_interop.py      # KOI-net protocol interop tests
 │   ├── requirements.txt
 │   └── venv/                        # Python virtualenv
+├── gv-agent/                   # Greater Victoria leaf node
+│   ├── config/gv.env               # GV-specific: DB=gv_koi, port=8352
+│   ├── workspace/                   # GV agent identity
+│   └── vault/                       # GV seed entities
+├── koi-state/                  # Node identity keys
+│   ├── octo-salish-sea_private_key.pem
+│   └── greater-victoria_private_key.pem
+├── scripts/                    # Multi-agent management
+│   ├── manage-agents.sh
+│   ├── agents.conf
+│   └── test-federation.sh
 ├── koi-stack/                  # Docker config
 │   ├── docker-compose.yml
 │   ├── Dockerfile.postgres-age
-│   └── init-extensions.sql
+│   ├── init-extensions.sql
+│   └── create-additional-dbs.sh
 ├── personal-koi-mcp/          # MCP server (TypeScript, from regen-koi-mcp fork)
 ├── bioregional-koi/           # OpenClaw plugin
 │   ├── openclaw.plugin.json
@@ -111,25 +147,44 @@ ssh root@45.132.245.30 "/root/octo-quartz/rebuild.sh"
 ssh root@45.132.245.30
 ```
 
-### Check service status
+### Check all agents status
 ```bash
-ssh root@45.132.245.30 "systemctl status koi-api && docker ps"
+ssh root@45.132.245.30 "bash ~/scripts/manage-agents.sh status"
 ```
 
 ### KOI API health check
 ```bash
-ssh root@45.132.245.30 "curl -s http://127.0.0.1:8351/health"
+ssh root@45.132.245.30 "curl -s http://127.0.0.1:8351/health"   # Octo
+ssh root@45.132.245.30 "curl -s http://127.0.0.1:8352/health"   # GV
 ```
 
-### Restart KOI API (after code changes)
+### KOI-net health check
 ```bash
-ssh root@45.132.245.30 "systemctl restart koi-api"
+ssh root@45.132.245.30 "curl -s http://127.0.0.1:8351/koi-net/health"
+```
+
+### Restart agents (after code changes)
+```bash
+ssh root@45.132.245.30 "bash ~/scripts/manage-agents.sh restart"
+# Or individually:
+ssh root@45.132.245.30 "systemctl restart koi-api"       # Octo
+ssh root@45.132.245.30 "systemctl restart gv-koi-api"    # GV
 ```
 
 ### Deploy updated Python files
 ```bash
-scp koi-processor/api/entity_schema.py koi-processor/api/vault_parser.py root@45.132.245.30:~/koi-processor/api/
-ssh root@45.132.245.30 "systemctl restart koi-api"
+scp koi-processor/api/*.py root@45.132.245.30:~/koi-processor/api/
+ssh root@45.132.245.30 "bash ~/scripts/manage-agents.sh restart"
+```
+
+### Run federation test
+```bash
+ssh root@45.132.245.30 "bash ~/scripts/test-federation.sh"
+```
+
+### Run interop test
+```bash
+ssh root@45.132.245.30 "cd ~/koi-processor && venv/bin/python tests/test_koi_interop.py"
 ```
 
 ### Run a database migration
@@ -159,24 +214,41 @@ ssh root@45.132.245.30 "nano ~/.openclaw/workspace/KNOWLEDGE.md"
 scp workspace/KNOWLEDGE.md root@45.132.245.30:~/.openclaw/workspace/
 ```
 
-## Database
+## Databases
 
-- **Name:** `octo_koi`
-- **User:** `postgres`
-- **Extensions:** pgvector, Apache AGE, pg_trgm, fuzzystrmatch, uuid-ossp
-- **Graph:** `regen_graph` (AGE)
-- **Key tables:**
-  - `entity_registry` — All registered entities (57 as of Feb 2026)
-  - `entity_relationships` — Typed relationships between entities (31)
-  - `allowed_predicates` — Valid predicate definitions (27)
-  - `pending_relationships` — Unresolved relationship targets
-  - `document_entity_links` — Document↔entity mention tracking
+All databases share one PostgreSQL container (`regen-koi-postgres`) with pgvector, Apache AGE, pg_trgm, fuzzystrmatch, uuid-ossp.
+
+| Database | Agent | Entities |
+|----------|-------|----------|
+| `octo_koi` | Octo (Salish Sea) | 57 |
+| `gv_koi` | Greater Victoria | 4 |
+
+### Key tables (per database)
+
+- `entity_registry` — All registered entities with `koi_rid` for federation
+- `entity_relationships` — Typed relationships between entities
+- `allowed_predicates` — Valid predicate definitions (27 BKC predicates)
+- `pending_relationships` — Unresolved relationship targets
+- `document_entity_links` — Document↔entity mention tracking
+
+### Federation tables (KOI-net, per database)
+
+- `koi_net_events` — Event queue (delivered_to, confirmed_by arrays, TTL)
+- `koi_net_edges` — Node-to-node relationships (POLL/PUSH, rid_types filter)
+- `koi_net_nodes` — Peer registry with public keys
+- `koi_net_cross_refs` — Cross-references linking local entities to remote RIDs
+
+### Schema infrastructure tables (octo_koi only)
+
+- `source_schemas` — Schema registry with consent tracking
+- `ontology_mappings` — Source→BKC field mappings
 
 ## Backups
 
 Automated via cron (daily at 3am CET):
-- **DB:** `pg_dump | gzip` → `/root/backups/octo_koi_YYYYMMDD.sql.gz`
+- **DB:** `pg_dump | gzip` → `/root/backups/{db_name}_YYYYMMDD.sql.gz` (both `octo_koi` and `gv_koi`)
 - **Vault:** `tar czf` → `/root/backups/vault_YYYYMMDD.tar.gz`
+- **Keys:** `tar czf` → `/root/backups/koi_state_YYYYMMDD.tar.gz` (node identity keys)
 - **Retention:** 7 days (old backups auto-deleted at 4am)
 
 ## BKC Ontology
@@ -204,7 +276,12 @@ The source files in this repo map to server paths:
 |-----------|-------------|
 | `koi-processor/api/` | `/root/koi-processor/api/` |
 | `koi-processor/migrations/` | `/root/koi-processor/migrations/` |
+| `koi-processor/scripts/` | `/root/koi-processor/scripts/` |
+| `koi-processor/tests/` | `/root/koi-processor/tests/` |
 | `docker/` | `/root/koi-stack/` |
+| `scripts/` | `/root/scripts/` |
+| `systemd/` | `/etc/systemd/system/` |
+| `gv-agent/` | `/root/gv-agent/` |
 | `workspace/` | `/root/.openclaw/workspace/` |
 | `plugins/bioregional-koi/` | `/root/bioregional-koi/` |
 | `vault-seed/` | `/root/.openclaw/workspace/vault/` (subset) |

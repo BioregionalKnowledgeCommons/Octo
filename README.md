@@ -4,14 +4,31 @@
 
 Octo is an AI agent built on [OpenClaw](https://github.com/openclaw/openclaw) that serves as an organ of perception for the Salish Sea bioregion. It combines a knowledge graph backend with a formal ontology for bioregional knowledge commoning — enabling it to reason about practices, patterns, discourse, and the relationships between them.
 
+Octo is also a **KOI-net federation coordinator** — it aggregates knowledge from leaf-node agents (Greater Victoria, Gulf Islands, etc.) into a unified Salish Sea knowledge commons using the [KOI-net protocol](https://github.com/BlockScience/koi-net) for authenticated, event-driven federation.
+
 ## What Octo Does
 
 - **Knowledge Commoning**: Tracks bioregional practices, identifies trans-bioregional patterns, and documents case studies using a formal ontology grounded in the work of David Bollier & Silke Helfrich
 - **Discourse Graph**: Manages questions, claims, and evidence with typed relationships (supports, opposes, informs) — enabling progressive formalization of bioregional knowledge
 - **Entity Resolution**: Multi-tier entity resolution (exact → fuzzy → semantic → create) with OpenAI embeddings and pgvector
 - **Vault Integration**: Bidirectional linking between an Obsidian-style vault and a PostgreSQL knowledge graph
+- **KOI-net Federation**: Authenticated event-driven protocol for cross-bioregional knowledge sharing with ECDSA-signed envelopes, background polling, and cross-reference resolution
 
 ## Architecture
+
+### Holonic Network
+
+```
+[Greater Victoria]   [Gulf Islands]        ← leaf nodes (bioregional agents)
+        ↘                 ↙
+   [Octo / Salish Sea Coordinator]         ← federation coordinator
+              ↓
+      [Cascadia Coordinator]               ← future meta-coordinator
+```
+
+Each node runs the same KOI API codebase with its own database, vault, and identity. Nodes exchange events via the KOI-net protocol — when a practice is registered in Greater Victoria, it appears as a cross-reference in Octo within seconds.
+
+### Single Node
 
 ```
 ┌──────────────────────────────────────────────────┐
@@ -25,15 +42,28 @@ Octo is an AI agent built on [OpenClaw](https://github.com/openclaw/openclaw) th
 │  ├─ Vault read/write                              │
 │  └─ Relationship sync                             │
 ├──────────────────────────────────────────────────┤
-│  KOI Processor API (uvicorn, port 8351)           │
+│  KOI Processor API (uvicorn)                      │
 │  ├─ entity_schema.py  (15 entity types)           │
 │  ├─ vault_parser.py   (27 predicates, aliases)    │
-│  └─ personal_ingest_api.py                        │
+│  ├─ personal_ingest_api.py                        │
+│  └─ KOI-net protocol (feature flag)               │
+│     ├─ koi_net_router.py   (8 protocol endpoints) │
+│     ├─ koi_envelope.py     (ECDSA P-256 signing)  │
+│     ├─ koi_poller.py       (background poller)     │
+│     ├─ event_queue.py      (DB-backed queue)       │
+│     └─ node_identity.py    (keypair + RID)         │
 ├──────────────────────────────────────────────────┤
 │  PostgreSQL + pgvector + Apache AGE               │
 │  (Docker, localhost:5432)                         │
 └──────────────────────────────────────────────────┘
 ```
+
+### Live Agents
+
+| Agent | Port | Node RID | Entities | KOI-net |
+|-------|------|----------|----------|---------|
+| **Octo** (Salish Sea) | 8351 | `orn:koi-net.node:octo-salish-sea+50a3c...` | 57 | Enabled (coordinator) |
+| **Greater Victoria** | 8352 | `orn:koi-net.node:greater-victoria+81ec4...` | 4 | Enabled (leaf node) |
 
 ## BKC Ontology
 
@@ -68,7 +98,7 @@ See [ontology/bkc-ontology.jsonld](ontology/bkc-ontology.jsonld) for the formal 
 ## Repository Structure
 
 ```
-├── workspace/              # OpenClaw workspace files (agent identity & config)
+├── workspace/              # Octo's OpenClaw workspace (agent identity & config)
 │   ├── IDENTITY.md         # Who Octo is
 │   ├── SOUL.md             # Philosophy and values
 │   ├── KNOWLEDGE.md        # BKC domain expertise
@@ -76,38 +106,57 @@ See [ontology/bkc-ontology.jsonld](ontology/bkc-ontology.jsonld) for the formal 
 │   ├── AGENTS.md           # Agent routing and session rules
 │   ├── TOOLS.md            # Environment-specific tool config
 │   └── HEARTBEAT.md        # Periodic check tasks
+├── gv-agent/               # Greater Victoria leaf node
+│   ├── config/gv.env       # GV-specific env (DB, port, node name)
+│   ├── workspace/          # GV agent identity (IDENTITY.md, SOUL.md)
+│   └── vault/              # GV seed entities (Practices/, Bioregions/)
 ├── plugins/
 │   └── bioregional-koi/    # OpenClaw plugin connecting to KOI API
 │       ├── openclaw.plugin.json
 │       └── index.ts
-├── koi-processor/          # Python backend (entity resolution + vault sync)
+├── koi-processor/          # Python backend (shared by all agents)
 │   ├── api/
-│   │   ├── personal_ingest_api.py
-│   │   ├── entity_schema.py
-│   │   └── vault_parser.py
+│   │   ├── personal_ingest_api.py   # Main API (FastAPI/uvicorn)
+│   │   ├── entity_schema.py         # 15 entity types, resolution config
+│   │   ├── vault_parser.py          # YAML→predicate mapping
+│   │   ├── koi_net_router.py        # KOI-net protocol endpoints
+│   │   ├── koi_envelope.py          # ECDSA P-256 signed envelopes
+│   │   ├── koi_poller.py            # Background federation poller
+│   │   ├── koi_protocol.py          # Wire format models (Pydantic)
+│   │   ├── event_queue.py           # DB-backed event queue
+│   │   └── node_identity.py         # Keypair + node RID generation
 │   ├── config/
 │   │   └── personal.env.example
 │   ├── migrations/
-│   │   └── 038_bkc_predicates.sql
+│   │   ├── 038_bkc_predicates.sql
+│   │   ├── 039_koi_net_events.sql   # Event queue, edges, nodes tables
+│   │   ├── 039b_ontology_mappings.sql # Source schemas + mappings
+│   │   ├── 040_entity_koi_rids.sql  # KOI RID column on entity_registry
+│   │   └── 041_cross_references.sql # Cross-references for federation
+│   ├── scripts/
+│   │   └── backfill_koi_rids.py     # One-time RID backfill
+│   ├── tests/
+│   │   └── test_koi_interop.py      # KOI-net protocol interop tests
 │   └── requirements.txt
 ├── docker/                 # PostgreSQL stack with pgvector + Apache AGE
 │   ├── docker-compose.yml
 │   ├── Dockerfile.postgres-age
-│   └── init-extensions.sql
+│   ├── init-extensions.sql
+│   └── create-additional-dbs.sh     # Create DBs for new agents
+├── scripts/                # Multi-agent management
+│   ├── manage-agents.sh    # Start/stop/status for all agents
+│   ├── agents.conf         # Agent registry (name:service:port)
+│   └── test-federation.sh  # End-to-end federation test
 ├── ontology/               # Formal BKC ontology (JSON-LD)
 │   └── bkc-ontology.jsonld
 ├── vault-seed/             # Seed entity notes exercising the full predicate chain
-│   ├── Bioregions/
-│   ├── Practices/
-│   ├── Patterns/
-│   ├── CaseStudies/
-│   ├── Questions/
-│   ├── Claims/
-│   ├── Evidence/
-│   ├── Protocols/
-│   └── Playbooks/
-└── systemd/                # Service definitions
-    └── koi-api.service
+├── systemd/                # Service definitions
+│   ├── koi-api.service     # Octo (port 8351)
+│   └── gv-koi-api.service  # Greater Victoria (port 8352)
+└── docs/                   # Strategy and implementation plans
+    ├── holonic-bioregional-knowledge-commons.md
+    ├── ontological-architecture.md
+    └── implementation-plan.md
 ```
 
 ## Deployment
@@ -119,56 +168,48 @@ See [ontology/bkc-ontology.jsonld](ontology/bkc-ontology.jsonld) for the formal 
 - Python 3.12+
 - An OpenAI API key (for semantic entity resolution)
 
-### Quick Start
+### Quick Start (Single Agent)
 
-1. **Clone and configure**
-   ```bash
-   git clone https://github.com/DarrenZal/Octo.git
-   cd Octo
-   cp koi-processor/config/personal.env.example koi-processor/config/personal.env
-   # Edit personal.env with your credentials
-   ```
+```bash
+git clone https://github.com/DarrenZal/Octo.git && cd Octo
+cp koi-processor/config/personal.env.example koi-processor/config/personal.env
+# Edit personal.env with your credentials
 
-2. **Start PostgreSQL stack**
-   ```bash
-   cd docker
-   docker compose up -d
-   ```
+cd docker && docker compose up -d && cd ..
+cd koi-processor && python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+cat migrations/038_bkc_predicates.sql | docker exec -i regen-koi-postgres psql -U postgres -d octo_koi
 
-3. **Set up KOI Processor**
-   ```bash
-   cd koi-processor
-   python3 -m venv venv
-   source venv/bin/activate
-   pip install -r requirements.txt
-   ```
+source config/personal.env
+uvicorn api.personal_ingest_api:app --host 127.0.0.1 --port 8351
+```
 
-4. **Run database migration**
-   ```bash
-   cat migrations/038_bkc_predicates.sql | docker exec -i <postgres-container> psql -U postgres -d octo_koi
-   ```
+### Adding a Leaf Node
 
-5. **Start the API**
-   ```bash
-   source config/personal.env
-   uvicorn api.personal_ingest_api:app --host 127.0.0.1 --port 8351
-   ```
+```bash
+# Create database for new agent
+bash docker/create-additional-dbs.sh gv_koi
 
-6. **Install workspace files**
-   ```bash
-   cp workspace/* ~/.openclaw/workspace/
-   ```
+# Configure and start (see gv-agent/ for example)
+# Set KOI_NET_ENABLED=true in env for federation
+bash scripts/manage-agents.sh status
+```
 
-7. **Seed the vault**
-   ```bash
-   cp -r vault-seed/* ~/.openclaw/workspace/vault/
-   ```
+### KOI-net Federation
 
-8. **Verify**
-   ```bash
-   curl http://localhost:8351/health
-   # Should show 15 entity types, 27 predicates
-   ```
+Enable federation by setting `KOI_NET_ENABLED=true` in the agent's env file. This activates:
+- Protocol endpoints at `/koi-net/*` (handshake, poll, broadcast, confirm, etc.)
+- ECDSA P-256 signed envelopes for authenticated communication
+- Background poller for event-driven cross-reference creation
+- Auto-generated node identity (keypair stored in `/root/koi-state/`)
+
+### Multi-Agent Management
+
+```bash
+bash scripts/manage-agents.sh status   # Health, RAM, PG connections
+bash scripts/manage-agents.sh restart  # Restart all agents
+bash scripts/test-federation.sh        # End-to-end federation test
+```
 
 ## Context
 
