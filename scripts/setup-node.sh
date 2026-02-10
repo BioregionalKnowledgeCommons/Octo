@@ -1,0 +1,367 @@
+#!/bin/bash
+# Interactive setup wizard for a new KOI federation node.
+# Run this after completing Steps 1-3 of docs/join-the-network.md
+# (VPS provisioned, Octo repo cloned, PostgreSQL running).
+#
+# Usage: bash /root/Octo/scripts/setup-node.sh
+
+set -euo pipefail
+
+OCTO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+# ─── Colors ───
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+info()  { echo -e "${CYAN}→${NC} $1"; }
+ok()    { echo -e "${GREEN}✓${NC} $1"; }
+warn()  { echo -e "${YELLOW}!${NC} $1"; }
+err()   { echo -e "${RED}✗${NC} $1"; }
+header(){ echo -e "\n${BOLD}── $1 ──${NC}\n"; }
+
+# ─── Pre-flight checks ───
+header "KOI Node Setup Wizard"
+echo "This will set up a new KOI federation node on this server."
+echo "Make sure you've completed Steps 1-3 of the guide first:"
+echo "  - VPS provisioned with Docker, Python 3, Node.js"
+echo "  - Octo repo cloned to /root/Octo"
+echo "  - PostgreSQL running (docker compose up -d)"
+echo ""
+
+# Check Docker is running
+if ! docker exec regen-koi-postgres pg_isready -U postgres &>/dev/null; then
+  err "PostgreSQL container not running. Start it first:"
+  echo "  cd $OCTO_DIR/docker && docker compose up -d"
+  exit 1
+fi
+ok "PostgreSQL is running"
+
+# Check Python venv exists or can be created
+if [ ! -d "$OCTO_DIR/koi-processor/venv" ]; then
+  info "Python virtualenv not found. Creating it..."
+  python3 -m venv "$OCTO_DIR/koi-processor/venv"
+  "$OCTO_DIR/koi-processor/venv/bin/pip" install -q -r "$OCTO_DIR/koi-processor/requirements.txt"
+  ok "Python virtualenv created and dependencies installed"
+else
+  ok "Python virtualenv exists"
+fi
+
+# ─── Gather info ───
+header "Node Configuration"
+
+# Node name
+echo "What is your bioregion or node name?"
+echo "  Examples: Cowichan Valley, Front Range, Boulder Creek"
+read -rp "  Node name: " NODE_FULL_NAME
+
+if [ -z "$NODE_FULL_NAME" ]; then
+  err "Node name cannot be empty"
+  exit 1
+fi
+
+# Derive short name (lowercase, hyphens for spaces)
+NODE_SLUG=$(echo "$NODE_FULL_NAME" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | sed 's/[^a-z0-9-]//g')
+# Derive even shorter name for DB (first letters of each word, or first 2 words abbreviated)
+DB_SHORT=$(echo "$NODE_FULL_NAME" | tr '[:upper:]' '[:lower:]' | awk '{for(i=1;i<=NF;i++) printf substr($i,1,1)}' | sed 's/[^a-z]//g')
+# If single word, use first 4 chars
+if [ ${#DB_SHORT} -le 1 ]; then
+  DB_SHORT=$(echo "$NODE_SLUG" | head -c 6)
+fi
+
+DB_NAME="${DB_SHORT}_koi"
+AGENT_DIR="/root/${DB_SHORT}-agent"
+SERVICE_NAME="${DB_SHORT}-koi-api"
+
+echo ""
+info "Based on \"$NODE_FULL_NAME\", here are your derived names:"
+echo "  Database:        $DB_NAME"
+echo "  Agent directory: $AGENT_DIR"
+echo "  systemd service: $SERVICE_NAME"
+echo "  KOI node name:   $NODE_SLUG"
+echo ""
+read -rp "  Look good? (Y/n) " CONFIRM
+if [[ "${CONFIRM,,}" == "n" ]]; then
+  echo ""
+  read -rp "  Database name (e.g. cv_koi): " DB_NAME
+  read -rp "  Agent directory (e.g. /root/cv-agent): " AGENT_DIR
+  read -rp "  systemd service name (e.g. cv-koi-api): " SERVICE_NAME
+  read -rp "  KOI node name (e.g. cowichan-valley): " NODE_SLUG
+fi
+
+# Node type
+echo ""
+echo "What type of node is this?"
+echo "  1) Leaf node — sub-bioregion under a coordinator (e.g. under Salish Sea)"
+echo "  2) Peer network — independent bioregion, exchanges knowledge as equals"
+echo "  3) Personal/research — standalone, optional federation"
+read -rp "  Choose (1/2/3): " NODE_TYPE_NUM
+
+case "$NODE_TYPE_NUM" in
+  1) NODE_TYPE="Leaf node" ;;
+  2) NODE_TYPE="Peer network" ;;
+  3) NODE_TYPE="Personal/research" ;;
+  *) NODE_TYPE="Leaf node" ;;
+esac
+
+# PostgreSQL password
+echo ""
+if [ -f ~/.env ] && grep -q POSTGRES_PASSWORD ~/.env; then
+  PG_PASS=$(grep POSTGRES_PASSWORD ~/.env | head -1 | cut -d= -f2)
+  ok "Found PostgreSQL password in ~/.env"
+else
+  read -rp "  PostgreSQL password (from Step 3): " PG_PASS
+  if [ -z "$PG_PASS" ]; then
+    err "Password required"
+    exit 1
+  fi
+fi
+
+# OpenAI API key
+echo ""
+echo "OpenAI API key (for semantic entity resolution, ~\$1-2/month)."
+echo "  Get one at: https://platform.openai.com/api-keys"
+read -rp "  OpenAI API key: " OPENAI_KEY
+
+if [ -z "$OPENAI_KEY" ]; then
+  warn "No OpenAI key provided. Semantic matching will be disabled."
+  warn "You can add it later in $AGENT_DIR/config/${DB_SHORT}.env"
+fi
+
+# API port
+API_PORT=8351
+echo ""
+echo "KOI API port (default 8351). Change if running multiple nodes on one server."
+read -rp "  API port [$API_PORT]: " INPUT_PORT
+API_PORT="${INPUT_PORT:-$API_PORT}"
+
+# ─── Create everything ───
+header "Setting Up Node"
+
+# 1. Create database
+info "Creating database $DB_NAME..."
+if docker exec regen-koi-postgres psql -U postgres -tc "SELECT 1 FROM pg_database WHERE datname = '$DB_NAME'" | grep -q 1; then
+  warn "Database $DB_NAME already exists, skipping creation"
+else
+  bash "$OCTO_DIR/docker/create-additional-dbs.sh" "$DB_NAME"
+  ok "Database $DB_NAME created"
+fi
+
+# 2. Create agent directory
+info "Creating agent directory $AGENT_DIR..."
+mkdir -p "$AGENT_DIR"/{config,workspace,vault}
+mkdir -p "$AGENT_DIR"/vault/{Bioregions,Practices,Patterns,Organizations,Projects,Concepts,People,Locations,CaseStudies,Protocols,Playbooks,Questions,Claims,Evidence,Sources}
+ok "Agent directory created with vault subdirectories"
+
+# 3. Generate env file
+info "Generating config file..."
+ENV_FILE="$AGENT_DIR/config/${DB_SHORT}.env"
+cat > "$ENV_FILE" << ENVEOF
+# KOI Node Configuration — $NODE_FULL_NAME
+# Generated by setup-node.sh on $(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+# PostgreSQL
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=$DB_NAME
+DB_USER=postgres
+DB_PASSWORD=$PG_PASS
+
+# OpenAI (for semantic entity resolution)
+OPENAI_API_KEY=$OPENAI_KEY
+EMBEDDING_MODEL=text-embedding-3-small
+
+# Vault
+VAULT_PATH=$AGENT_DIR/vault
+
+# KOI-net federation
+KOI_NET_ENABLED=true
+KOI_NODE_NAME=$NODE_SLUG
+KOI_STATE_DIR=/root/koi-state
+
+# API
+KOI_API_PORT=$API_PORT
+ENVEOF
+
+# Also copy to koi-processor config for convenience
+cp "$ENV_FILE" "$OCTO_DIR/koi-processor/config/${DB_SHORT}.env"
+ok "Config written to $ENV_FILE"
+
+# 4. Create base schema by starting API briefly
+info "Creating base database schema (starting API briefly)..."
+cd "$OCTO_DIR/koi-processor"
+set -a; source "$ENV_FILE"; set +a
+timeout 15 venv/bin/uvicorn api.personal_ingest_api:app --host 127.0.0.1 --port "$API_PORT" &>/dev/null || true
+sleep 2
+
+# Verify base tables exist
+TABLE_COUNT=$(docker exec regen-koi-postgres psql -U postgres -d "$DB_NAME" -tc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'" | tr -d ' ')
+if [ "$TABLE_COUNT" -gt 0 ]; then
+  ok "Base schema created ($TABLE_COUNT tables)"
+else
+  warn "Base tables may not have been created. Trying again..."
+  timeout 15 venv/bin/uvicorn api.personal_ingest_api:app --host 127.0.0.1 --port "$API_PORT" &>/dev/null || true
+  sleep 2
+fi
+
+# 5. Run additional migrations
+info "Running migrations..."
+PSQL="docker exec -i regen-koi-postgres psql -U postgres -d $DB_NAME"
+
+for MIG in 038_bkc_predicates 039_koi_net_events 039b_ontology_mappings 040_entity_koi_rids 041_cross_references 042_web_submissions; do
+  MIG_FILE="$OCTO_DIR/koi-processor/migrations/${MIG}.sql"
+  if [ -f "$MIG_FILE" ]; then
+    cat "$MIG_FILE" | $PSQL &>/dev/null && ok "  $MIG" || warn "  $MIG (may already exist)"
+  fi
+done
+
+# 6. Generate workspace files
+info "Generating workspace files..."
+
+cat > "$AGENT_DIR/workspace/IDENTITY.md" << IDEOF
+# IDENTITY.md — $NODE_FULL_NAME Knowledge Agent
+
+- **Name:** $NODE_FULL_NAME Node
+- **Role:** Bioregional knowledge agent for $NODE_FULL_NAME
+- **Node Type:** $NODE_TYPE
+
+## What I Do
+
+I am the knowledge backend for the $NODE_FULL_NAME bioregion. I track local
+practices, patterns, and ecological knowledge specific to this place.
+
+## Bioregional Context
+
+TODO: Describe your bioregion here — the land, water, peoples, and ecology.
+
+## Boundaries
+
+- I serve the $NODE_FULL_NAME bioregion
+IDEOF
+
+cat > "$AGENT_DIR/workspace/SOUL.md" << SOEOF
+# SOUL.md — $NODE_FULL_NAME Node Values
+
+## Core Values
+
+- **Knowledge as commons** — share freely, govern collectively
+- **Epistemic justice** — respect diverse ways of knowing
+- **Knowledge sovereignty** — communities govern their own knowledge
+- **Federation over consolidation** — one node in a web, many centers
+
+## Place-Specific Grounding
+
+TODO: What makes this place unique? What does knowledge mean here?
+SOEOF
+
+ok "Workspace files created (edit them later to add bioregional detail)"
+
+# 7. Create bioregion entity
+info "Creating bioregion vault note..."
+BIOREGION_FILE="$AGENT_DIR/vault/Bioregions/$(echo "$NODE_FULL_NAME" | sed 's/[\/:]/-/g').md"
+cat > "$BIOREGION_FILE" << BIOEOF
+---
+"@type": "bkc:Bioregion"
+name: $NODE_FULL_NAME
+description: TODO — describe this bioregion
+tags:
+  - bioregion
+---
+
+# $NODE_FULL_NAME
+
+TODO: Describe this bioregion — its watersheds, ecology, communities, and Indigenous territories.
+BIOEOF
+ok "Bioregion note created at vault/Bioregions/"
+
+# 8. Create systemd service
+info "Creating systemd service $SERVICE_NAME..."
+cat > "/etc/systemd/system/${SERVICE_NAME}.service" << SVCEOF
+[Unit]
+Description=$NODE_FULL_NAME KOI API
+After=network.target docker.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=$OCTO_DIR/koi-processor
+Environment=PATH=$OCTO_DIR/koi-processor/venv/bin:/usr/bin
+EnvironmentFile=$ENV_FILE
+ExecStart=$OCTO_DIR/koi-processor/venv/bin/uvicorn api.personal_ingest_api:app --host 127.0.0.1 --port $API_PORT
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+
+systemctl daemon-reload
+systemctl enable "$SERVICE_NAME" &>/dev/null
+systemctl start "$SERVICE_NAME"
+ok "Service $SERVICE_NAME started"
+
+# 9. Wait and verify
+info "Waiting for API to start..."
+sleep 5
+
+if curl -s "http://127.0.0.1:$API_PORT/health" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status',''))" 2>/dev/null | grep -q ok; then
+  ok "API is healthy!"
+else
+  warn "API may still be starting. Check: journalctl -u $SERVICE_NAME -f"
+fi
+
+# 10. Seed the bioregion entity
+info "Seeding bioregion entity into database..."
+bash "$OCTO_DIR/scripts/seed-vault-entities.sh" "http://127.0.0.1:$API_PORT" "$AGENT_DIR/vault" 2>/dev/null || true
+
+# ─── Summary ───
+header "Setup Complete!"
+
+echo "Your node is running. Here's a summary:"
+echo ""
+echo "  Node name:        $NODE_FULL_NAME"
+echo "  Node type:        $NODE_TYPE"
+echo "  Database:         $DB_NAME"
+echo "  Agent directory:  $AGENT_DIR"
+echo "  Config file:      $ENV_FILE"
+echo "  systemd service:  $SERVICE_NAME"
+echo "  API URL:          http://127.0.0.1:$API_PORT"
+echo ""
+
+# Get node RID if KOI-net is enabled
+NODE_RID=$(curl -s "http://127.0.0.1:$API_PORT/koi-net/health" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('node_rid',''))" 2>/dev/null || echo "")
+if [ -n "$NODE_RID" ]; then
+  echo "  Node RID:         $NODE_RID"
+  echo ""
+fi
+
+echo "Next steps:"
+echo ""
+echo "  1. Edit your workspace files to add bioregional detail:"
+echo "     nano $AGENT_DIR/workspace/IDENTITY.md"
+echo "     nano $AGENT_DIR/workspace/SOUL.md"
+echo ""
+echo "  2. Add 2-3 practice vault notes:"
+echo "     nano $AGENT_DIR/vault/Practices/Your Practice.md"
+echo "     (see docs/join-the-network.md for the template)"
+echo ""
+echo "  3. Seed new vault notes into the database:"
+echo "     bash $OCTO_DIR/scripts/seed-vault-entities.sh http://127.0.0.1:$API_PORT $AGENT_DIR/vault"
+echo ""
+echo "  4. Set up OpenClaw chat agent (optional):"
+echo "     See docs/join-the-network.md → Step 10"
+echo ""
+echo "  5. Connect to the network — send Darren your:"
+echo "     - Server IP:  $(curl -s ifconfig.me 2>/dev/null || echo '<your-ip>')"
+echo "     - API port:   $API_PORT"
+if [ -n "$NODE_RID" ]; then
+  echo "     - Node RID:   $NODE_RID"
+fi
+echo ""
+echo "Useful commands:"
+echo "  systemctl status $SERVICE_NAME    # Check service"
+echo "  journalctl -u $SERVICE_NAME -f    # View logs"
+echo "  curl http://127.0.0.1:$API_PORT/health  # Health check"

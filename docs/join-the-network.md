@@ -125,6 +125,18 @@ Edges are configured via API calls or database inserts. See [Federation Setup](#
 
 **Time:** ~2 hours for the full setup. **Cost:** ~$11-27/month (VPS + API keys).
 
+### Quick setup (recommended)
+
+After completing Steps 1-3 (VPS, clone repo, start PostgreSQL), you can run the interactive setup wizard which automates Steps 4-9:
+
+```bash
+bash /root/Octo/scripts/setup-node.sh
+```
+
+The wizard will ask for your node name, OpenAI API key, and node type, then automatically create the database, directories, config, migrations, workspace files, and systemd service.
+
+If you prefer to do it manually (or need to understand each step), continue below.
+
 ### Prerequisites
 
 - A VPS with at least **2 vCPU, 4GB RAM, 40GB disk** ([Netcup](https://www.netcup.com/) VPS 1000 G11 ~$5/month, or similar)
