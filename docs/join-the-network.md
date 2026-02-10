@@ -179,9 +179,18 @@ docker exec regen-koi-postgres pg_isready -U postgres
 
 ### Step 4: Create your database
 
-Replace `cv_koi` with your agent's database name throughout.
+Pick a short name for your node's database. The convention is `{shortname}_koi` — for example:
+
+| Node | Database name |
+|---|---|
+| Cowichan Valley | `cv_koi` |
+| Front Range | `fr_koi` |
+| Boulder Creek | `boulder_koi` |
+
+Use this name everywhere in the remaining steps (env file, migrations, queries).
 
 ```bash
+# Example for Cowichan Valley — replace cv_koi with your chosen name
 bash /root/Octo/docker/create-additional-dbs.sh cv_koi
 ```
 
