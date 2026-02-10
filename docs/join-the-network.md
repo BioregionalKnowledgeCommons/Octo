@@ -900,10 +900,11 @@ INSERT INTO koi_net_nodes (node_rid, node_name, node_type, base_url, status, las
   ON CONFLICT (node_rid) DO NOTHING;
 
 -- Create edge: your node polls Octo for practices/patterns/case studies/bioregions
+-- Edge semantics: source = data provider (Octo), target = poller (your node)
 INSERT INTO koi_net_edges (edge_rid, source_node, target_node, edge_type, status, rid_types)
   VALUES ('orn:koi-net.edge:YOUR-SLUG-polls-octo-salish-sea',
-          'YOUR_NODE_RID',
           'orn:koi-net.node:octo-salish-sea+50a3c9eac05c807f',
+          'YOUR_NODE_RID',
           'POLL', 'APPROVED', '{Practice,Pattern,CaseStudy,Bioregion}')
   ON CONFLICT (edge_rid) DO NOTHING;
 SQL

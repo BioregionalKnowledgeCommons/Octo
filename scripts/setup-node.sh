@@ -356,8 +356,9 @@ else
     ok "Coordinator registered: $COORD_NAME"
 
     # Create edge: this node polls the coordinator
+    # Edge semantics: source = data provider (coordinator), target = poller (this node)
     info "Creating federation edge..."
-    echo "INSERT INTO koi_net_edges (edge_rid, source_node, target_node, edge_type, status, rid_types) VALUES ('$EDGE_RID', '$NODE_RID', '$COORD_RID', 'POLL', 'APPROVED', '$RID_TYPES') ON CONFLICT (edge_rid) DO NOTHING;" | $PSQL_FED &>/dev/null
+    echo "INSERT INTO koi_net_edges (edge_rid, source_node, target_node, edge_type, status, rid_types) VALUES ('$EDGE_RID', '$COORD_RID', '$NODE_RID', 'POLL', 'APPROVED', '$RID_TYPES') ON CONFLICT (edge_rid) DO NOTHING;" | $PSQL_FED &>/dev/null
     ok "Edge created: $NODE_SLUG polls $COORD_NAME"
 
     # Check if port is open
@@ -407,7 +408,7 @@ if [ "${FEDERATION_DONE:-}" = "true" ]; then
   echo "    VALUES ('$NODE_RID', '$NODE_SLUG', 'FULL', 'http://$PUBLIC_IP:$API_PORT', 'active', now())"
   echo "    ON CONFLICT (node_rid) DO NOTHING;"
   echo "  INSERT INTO koi_net_edges (edge_rid, source_node, target_node, edge_type, status, rid_types)"
-  echo "    VALUES ('$EDGE_RID', '$NODE_RID', '$COORD_RID', 'POLL', 'APPROVED', '$RID_TYPES')"
+  echo "    VALUES ('$EDGE_RID', '$COORD_RID', '$NODE_RID', 'POLL', 'APPROVED', '$RID_TYPES')"
   echo "    ON CONFLICT (edge_rid) DO NOTHING;"
   echo "  SQL"
   echo ""
