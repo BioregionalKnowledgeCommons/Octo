@@ -2,7 +2,7 @@
 
 **A bioregional knowledge commoning agent for the Salish Sea**
 
-Octo is an AI agent built on [OpenClaw](https://github.com/openclaw/openclaw) that serves as an organ of perception for the Salish Sea bioregion. It combines a knowledge graph backend with a formal ontology for bioregional knowledge commoning — enabling it to reason about practices, patterns, discourse, and the relationships between them.
+Octo is an AI agent built on [OpenClaw](https://github.com/DarrenZal/openclaw) (our fork of [openclaw/openclaw](https://github.com/openclaw/openclaw)) that serves as an organ of perception for the Salish Sea bioregion. It combines a knowledge graph backend with a formal ontology for bioregional knowledge commoning — enabling it to reason about practices, patterns, discourse, and the relationships between them.
 
 Octo is also a **KOI-net federation coordinator** — it aggregates knowledge from leaf-node agents (Greater Victoria, Cowichan Valley, etc.) into a unified Salish Sea knowledge commons using the [KOI-net protocol](https://github.com/BlockScience/koi-net) for authenticated, event-driven federation.
 
@@ -176,7 +176,7 @@ See [ontology/bkc-ontology.jsonld](ontology/bkc-ontology.jsonld) for the formal 
 
 ### Prerequisites
 
-- [OpenClaw](https://github.com/openclaw/openclaw) installed and configured
+- [OpenClaw](https://github.com/DarrenZal/openclaw) (our fork) installed and configured
 - Docker and Docker Compose
 - Python 3.12+
 - An OpenAI API key (for semantic entity resolution)

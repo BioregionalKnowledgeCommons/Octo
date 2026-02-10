@@ -145,6 +145,36 @@ const bioregionalKoiPlugin = {
       { names: ["koi_search"] },
     );
 
+    // knowledge_search — semantic search over indexed documents (RAG)
+    api.registerTool(
+      {
+        name: "knowledge_search",
+        description:
+          "Search indexed documents using semantic similarity (RAG). Searches over koi_memories — GitHub code files, docs, markdown, configs — using OpenAI embeddings. Returns document-level results AND chunk-level results (individual functions, classes, or text sections). Use this for questions about codebase content, documentation, architecture, or any knowledge in the indexed repositories. For entity-level search, use koi_search instead.",
+        parameters: {
+          type: "object",
+          properties: {
+            query: { type: "string", description: "The search query — natural language question or keywords" },
+            source: { type: "string", description: "Optional: filter by source ('github', 'vault', 'email')" },
+            limit: { type: "number", description: "Max results (default 10)" },
+            include_chunks: { type: "boolean", description: "Include chunk-level results — individual functions/classes for code, text sections for docs (default true)" },
+          },
+          required: ["query"],
+        },
+        async execute(_id: string, params: Record<string, unknown>) {
+          const body: Record<string, unknown> = {
+            query: params.query,
+            limit: (params.limit as number) || 10,
+            include_chunks: params.include_chunks !== false,  // default true
+          };
+          if (params.source) body.source = params.source;
+          const data = await koiRequest("/search", "POST", body);
+          return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+        },
+      },
+      { names: ["knowledge_search"] },
+    );
+
     // vault_read_note — read a markdown note from the vault
     api.registerTool(
       {
@@ -313,6 +343,65 @@ const bioregionalKoiPlugin = {
         },
       },
       { names: ["ingest_url"] },
+    );
+
+    // github_scan — trigger a GitHub sensor scan or check status
+    api.registerTool(
+      {
+        name: "github_scan",
+        description:
+          "Trigger a GitHub repository scan or check sensor status. Use to index the Octo codebase for self-knowledge. Without action, returns current status.",
+        parameters: {
+          type: "object",
+          properties: {
+            action: {
+              type: "string",
+              description: "Action: 'scan' to trigger scan, 'status' to check status (default: status)",
+            },
+            repo_name: {
+              type: "string",
+              description: "Optional: specific repo to scan (e.g. 'DarrenZal/Octo')",
+            },
+          },
+        },
+        async execute(_id: string, params: Record<string, unknown>) {
+          const action = (params.action as string) || "status";
+          if (action === "scan") {
+            const repo_name = params.repo_name as string | undefined;
+            const qs = repo_name ? `?repo_name=${encodeURIComponent(repo_name)}` : "";
+            const data = await koiRequest(`/github/scan${qs}`, "POST");
+            return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+          }
+          const data = await koiRequest("/github/status");
+          return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+        },
+      },
+      { names: ["github_scan"] },
+    );
+
+    // code_query — run Cypher queries against the code graph
+    api.registerTool(
+      {
+        name: "code_query",
+        description:
+          "Query the code knowledge graph using Cypher. The graph contains Functions, Classes, Modules, Files, Imports, and Interfaces with CALLS, CONTAINS, BELONGS_TO relationships. Example: MATCH (f:Function) WHERE f.name = 'resolve_entity' RETURN f.file_path, f.signature",
+        parameters: {
+          type: "object",
+          properties: {
+            cypher: {
+              type: "string",
+              description: "Cypher query to execute against the regen_graph code knowledge graph",
+            },
+          },
+          required: ["cypher"],
+        },
+        async execute(_id: string, params: Record<string, unknown>) {
+          const cypher = params.cypher as string;
+          const data = await koiRequest("/code/query", "POST", { cypher });
+          return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+        },
+      },
+      { names: ["code_query"] },
     );
   },
 };

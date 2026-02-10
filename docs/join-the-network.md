@@ -241,12 +241,9 @@ nano config/cv.env
 Fill in these values — replace everything in `<angle brackets>` with your actual values:
 
 ```env
-# PostgreSQL — password is from Step 3 (check: cat ~/.env)
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=<your-db-name>
-DB_USER=postgres
-DB_PASSWORD=<your-postgres-password>
+# PostgreSQL — the API reads POSTGRES_URL (not individual DB_* vars)
+# Password is from Step 3 (check: cat ~/.env)
+POSTGRES_URL=postgresql://postgres:<your-password>@localhost:5432/<your-db-name>
 
 # OpenAI (for semantic entity resolution — get a key at https://platform.openai.com/api-keys)
 OPENAI_API_KEY=<your-openai-api-key>
@@ -267,8 +264,7 @@ KOI_API_PORT=8351
 **Example** for Cowichan Valley — a filled-in version would look like:
 
 ```env
-DB_NAME=cv_koi
-DB_PASSWORD=a1b2c3d4e5f6...
+POSTGRES_URL=postgresql://postgres:a1b2c3d4e5f6...@localhost:5432/cv_koi
 OPENAI_API_KEY=sk-proj-abc123...
 VAULT_PATH=/root/cv-agent/vault
 KOI_NODE_NAME=cowichan-valley
@@ -657,11 +653,8 @@ cp config/personal.env.example config/mine.env
 Edit `config/mine.env`:
 
 ```env
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=personal_koi
-DB_USER=postgres
-DB_PASSWORD=<your-docker-postgres-password>
+# PostgreSQL — the API reads POSTGRES_URL
+POSTGRES_URL=postgresql://postgres:<your-password>@localhost:5432/personal_koi
 
 OPENAI_API_KEY=sk-...
 EMBEDDING_MODEL=text-embedding-3-small

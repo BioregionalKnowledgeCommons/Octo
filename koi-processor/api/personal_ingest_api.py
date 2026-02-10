@@ -62,6 +62,7 @@ from api.entity_schema import (
     reload_entity_schemas,
     get_first_significant_token,
     get_phonetic_enabled_types,
+    type_to_folder,
     EntityTypeConfig,
 )
 
@@ -92,6 +93,7 @@ OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
 EMBEDDING_MODEL = os.getenv('EMBEDDING_MODEL', 'text-embedding-ada-002')
 ENABLE_SEMANTIC_MATCHING = os.getenv('ENABLE_SEMANTIC_MATCHING', 'true').lower() == 'true'
 KOI_NET_ENABLED = os.getenv('KOI_NET_ENABLED', 'false').lower() == 'true'
+GITHUB_SENSOR_ENABLED = os.getenv('GITHUB_SENSOR_ENABLED', 'false').lower() == 'true'
 
 # DEPRECATED: These are now loaded from vault schemas via entity_schema.py
 # Kept as fallback comments for reference
@@ -102,6 +104,7 @@ KOI_NET_ENABLED = os.getenv('KOI_NET_ENABLED', 'false').lower() == 'true'
 db_pool: Optional[asyncpg.Pool] = None
 openai_available: bool = False
 openai_client: Optional[Any] = None
+github_sensor = None  # GitHubSensor instance (lazy import)
 
 
 # =============================================================================
@@ -976,6 +979,26 @@ async def startup():
             logger.warning("OPENAI_API_KEY not set")
             logger.info("Tier 2 semantic matching: DISABLED (falling back to fuzzy matching)")
 
+        # Initialize GitHub sensor if enabled
+        if GITHUB_SENSOR_ENABLED:
+            try:
+                global github_sensor
+                from api.github_sensor import GitHubSensor
+                # Get event queue if KOI-net is available
+                event_queue = None
+                if KOI_NET_ENABLED:
+                    try:
+                        from api.koi_net_router import _event_queue
+                        event_queue = _event_queue
+                    except Exception:
+                        pass
+                github_sensor = GitHubSensor(db_pool, event_queue=event_queue)
+                github_sensor._embed_fn = generate_embedding
+                await github_sensor.start()
+                logger.info("GitHub sensor: ENABLED")
+            except Exception as e:
+                logger.error(f"Failed to initialize GitHub sensor: {e}")
+
     except Exception as e:
         logger.error(f"Failed to connect to database: {e}")
         raise
@@ -984,7 +1007,12 @@ async def startup():
 @app.on_event("shutdown")
 async def shutdown():
     """Stop background tasks and close database connection pool"""
-    global db_pool
+    global db_pool, github_sensor
+    if github_sensor:
+        try:
+            await github_sensor.stop()
+        except Exception as e:
+            logger.warning(f"GitHub sensor shutdown error: {e}")
     if KOI_NET_ENABLED:
         try:
             from api.koi_net_router import shutdown_koi_net
@@ -1293,7 +1321,128 @@ async def ensure_schema(conn: asyncpg.Connection):
     await conn.execute("CREATE INDEX IF NOT EXISTS idx_web_submissions_url ON web_submissions(url)")
     await conn.execute("CREATE INDEX IF NOT EXISTS idx_web_submissions_status ON web_submissions(status)")
 
-    logger.info("Schema verified/created (including relationship tables)")
+    # ==========================================================================
+    # GitHub Sensor Tables (Phase 5.7)
+    # ==========================================================================
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS github_repos (
+            id SERIAL PRIMARY KEY,
+            repo_url TEXT NOT NULL UNIQUE,
+            repo_name TEXT NOT NULL,
+            branch TEXT DEFAULT 'main',
+            clone_path TEXT,
+            last_commit_sha TEXT,
+            last_scan_at TIMESTAMPTZ,
+            file_count INT DEFAULT 0,
+            code_entity_count INT DEFAULT 0,
+            status VARCHAR(20) DEFAULT 'active',
+            error_message TEXT,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS github_file_state (
+            id SERIAL PRIMARY KEY,
+            repo_id INT REFERENCES github_repos(id) ON DELETE CASCADE,
+            file_path TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            rid TEXT NOT NULL,
+            vault_note_path TEXT,
+            line_count INT,
+            byte_size INT,
+            file_type TEXT,
+            last_commit_sha TEXT,
+            last_commit_author TEXT,
+            last_commit_date TIMESTAMPTZ,
+            last_commit_message TEXT,
+            entity_count INT DEFAULT 0,
+            code_entity_count INT DEFAULT 0,
+            scanned_at TIMESTAMPTZ DEFAULT NOW(),
+            UNIQUE(repo_id, file_path)
+        )
+    """)
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS koi_code_artifacts (
+            id SERIAL PRIMARY KEY,
+            code_uri TEXT UNIQUE NOT NULL,
+            kind TEXT NOT NULL,
+            repo_key TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            symbol TEXT,
+            language TEXT,
+            signature TEXT,
+            docstring TEXT,
+            line_start INT,
+            line_end INT,
+            commit_sha TEXT,
+            extraction_run_id TEXT,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_code_artifacts_repo ON koi_code_artifacts(repo_key)")
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_code_artifacts_kind ON koi_code_artifacts(kind)")
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_code_artifacts_file ON koi_code_artifacts(file_path)")
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_code_artifacts_symbol ON koi_code_artifacts(symbol)")
+
+    # =========================================================================
+    # KOI Memories + Chunks (RAG storage for documents)
+    # =========================================================================
+
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS koi_memories (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            rid VARCHAR(500) NOT NULL,
+            version INTEGER DEFAULT 1,
+            event_type VARCHAR(20) NOT NULL DEFAULT 'NEW',
+            source_sensor VARCHAR(200) NOT NULL,
+            content JSONB NOT NULL,
+            metadata JSONB DEFAULT '{}',
+            superseded_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW(),
+            UNIQUE(rid, version)
+        )
+    """)
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_koi_memories_rid ON koi_memories(rid)")
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_koi_memories_source ON koi_memories(source_sensor)")
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_koi_memories_created ON koi_memories(created_at DESC)")
+
+    # Unique constraint on rid for FK references
+    try:
+        await conn.execute("ALTER TABLE koi_memories ADD CONSTRAINT koi_memories_rid_key UNIQUE (rid)")
+    except Exception:
+        pass  # Already exists
+
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS koi_embeddings (
+            id SERIAL PRIMARY KEY,
+            memory_id UUID NOT NULL REFERENCES koi_memories(id) ON DELETE CASCADE,
+            dim_1536 vector(1536),
+            dim_1024 vector(1024),
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            UNIQUE(memory_id)
+        )
+    """)
+
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS koi_memory_chunks (
+            id SERIAL PRIMARY KEY,
+            chunk_rid VARCHAR UNIQUE NOT NULL,
+            document_rid VARCHAR NOT NULL REFERENCES koi_memories(rid) ON DELETE CASCADE,
+            chunk_index INTEGER NOT NULL,
+            total_chunks INTEGER NOT NULL,
+            content JSONB NOT NULL,
+            embedding vector(1536),
+            metadata JSONB DEFAULT '{}',
+            created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_chunks_document ON koi_memory_chunks(document_rid)")
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_chunks_created ON koi_memory_chunks(created_at DESC)")
+
+    logger.info("Schema verified/created (including relationship + GitHub + RAG tables)")
 
 
 @app.get("/health")
@@ -1316,6 +1465,7 @@ async def health_check():
             "semantic_matching": openai_available and ENABLE_SEMANTIC_MATCHING,
             "entity_types": entity_types,
             "schema_version": get_schema_version(),
+            "github_sensor": GITHUB_SENSOR_ENABLED and github_sensor is not None,
             "resolution_tiers": {
                 "tier1_exact": True,
                 "tier1x_fuzzy": True,
@@ -3163,10 +3313,13 @@ async def search_knowledge_base(request: SearchRequest):
     if not db_pool:
         raise HTTPException(status_code=503, detail="Database not available")
 
-    # Generate query embedding using BGE
-    query_embedding = await get_bge_embedding(request.query)
+    # Generate query embedding using OpenAI (or fall back to BGE)
+    query_embedding = await generate_embedding(request.query)
+    if not query_embedding:
+        query_embedding = await get_bge_embedding(request.query)
 
     results = []
+    chunk_results = []
     search_type = "text"  # fallback
 
     async with db_pool.acquire() as conn:
@@ -3179,26 +3332,29 @@ async def search_knowledge_base(request: SearchRequest):
                 source_filter = "AND m.source_sensor = 'email-sensor'"
             elif request.source == 'vault':
                 source_filter = "AND m.source_sensor = 'obsidian-sensor'"
+            elif request.source == 'github':
+                source_filter = "AND m.source_sensor = 'github-sensor'"
             elif request.source:
                 source_filter = f"AND m.source_sensor = '{request.source}'"
             else:
                 source_filter = ""
 
-            # Search doc-level embeddings
+            # Search doc-level embeddings (prefer dim_1536 OpenAI, fall back to dim_1024 BGE)
+            dim_col = "dim_1536" if len(query_embedding) > 1024 else "dim_1024"
             query = f"""
                 SELECT
                     m.rid,
                     m.content->>'title' as title,
                     LEFT(m.content->>'text', 500) as content_preview,
-                    1 - (e.dim_1024 <=> $1::vector) as similarity,
+                    1 - (e.{dim_col} <=> $1::vector) as similarity,
                     m.source_sensor,
                     m.metadata,
                     m.created_at
                 FROM koi_memories m
                 JOIN koi_embeddings e ON e.memory_id = m.id
-                WHERE e.dim_1024 IS NOT NULL
+                WHERE e.{dim_col} IS NOT NULL
                 {source_filter}
-                ORDER BY e.dim_1024 <=> $1::vector
+                ORDER BY e.{dim_col} <=> $1::vector
                 LIMIT $2
             """
 
@@ -3240,43 +3396,41 @@ async def search_knowledge_base(request: SearchRequest):
 
                 results.append(result)
 
-            # Optionally search chunks for more coverage
-            if request.include_chunks and len(results) < request.limit:
+            # Search chunk-level embeddings (separate results for granularity)
+            if request.include_chunks:
                 chunk_query = f"""
-                    SELECT DISTINCT ON (c.document_rid)
-                        c.document_rid as rid,
-                        m.content->>'title' as title,
-                        LEFT(c.content->>'text', 500) as content_preview,
+                    SELECT
+                        c.chunk_rid,
+                        c.document_rid,
+                        m.content->>'title' as doc_title,
+                        c.content->>'text' as chunk_text,
                         1 - (c.embedding <=> $1::vector) as similarity,
                         m.source_sensor,
-                        m.metadata
+                        c.metadata as chunk_metadata
                     FROM koi_memory_chunks c
                     JOIN koi_memories m ON m.rid = c.document_rid
                     WHERE c.embedding IS NOT NULL
-                      AND c.document_rid NOT IN (SELECT rid FROM unnest($3::text[]) as rid)
-                    {source_filter.replace('m.source_sensor', 'm.source_sensor')}
-                    ORDER BY c.document_rid, c.embedding <=> $1::vector
+                    {source_filter}
+                    ORDER BY c.embedding <=> $1::vector
                     LIMIT $2
                 """
 
-                existing_rids = [r['rid'] for r in results]
                 chunk_rows = await conn.fetch(
                     chunk_query,
                     embedding_str,
-                    request.limit - len(results),
-                    existing_rids
+                    request.limit,
                 )
 
                 for row in chunk_rows:
-                    chunk_metadata = row['metadata'] if row['metadata'] else {}
-                    results.append({
-                        "rid": row['rid'],
-                        "title": row['title'],
-                        "content_preview": row['content_preview'],
+                    chunk_meta = row['chunk_metadata'] if row['chunk_metadata'] else {}
+                    chunk_results.append({
+                        "chunk_rid": row['chunk_rid'],
+                        "document_rid": row['document_rid'],
+                        "doc_title": row['doc_title'],
+                        "text": row['chunk_text'][:500] if row['chunk_text'] else "",
                         "similarity": float(row['similarity']) if row['similarity'] else 0,
                         "source": row['source_sensor'],
-                        "metadata": chunk_metadata,
-                        "matched_via": "chunk"
+                        "metadata": chunk_meta,
                     })
 
         else:
@@ -3319,13 +3473,16 @@ async def search_knowledge_base(request: SearchRequest):
                     "metadata": text_metadata
                 })
 
-    return {
+    response = {
         "results": results,
         "count": len(results),
         "query": request.query,
         "search_type": search_type,
         "source_filter": request.source
     }
+    if chunk_results:
+        response["chunk_results"] = chunk_results
+    return response
 
 
 @app.get("/search")
@@ -3756,6 +3913,15 @@ async def web_ingest(request: WebIngestRequest):
         submission, canonical_entities, request.vault_folder
     )
 
+    # Create vault notes for newly discovered entities
+    source_note_name = vault_path.replace(".md", "")  # e.g. "Sources/SalishSeaio"
+    for entity, canonical in zip(request.entities, canonical_entities):
+        if canonical.is_new:
+            _create_entity_vault_note(
+                canonical.name, canonical.type, canonical.uri,
+                source_note_name, entity.context,
+            )
+
     # Update submission record
     import json as json_module
     async with db_pool.acquire() as conn:
@@ -3835,8 +4001,8 @@ def _generate_source_vault_note(
     # Build frontmatter
     entity_links = []
     for ce in canonical_entities:
-        type_folder = ce.type + "s" if not ce.type.endswith("s") else ce.type
-        entity_links.append(f"[[{type_folder}/{ce.name}]]")
+        folder = type_to_folder(ce.type)
+        entity_links.append(f"[[{folder}/{ce.name}]]")
 
     tags = list(submission["bioregional_tags"] or [])
 
@@ -3886,6 +4052,180 @@ def _generate_source_vault_note(
 
     logger.info(f"Generated vault note: {rel_path}")
     return rel_path
+
+
+def _create_entity_vault_note(
+    entity_name: str,
+    entity_type: str,
+    entity_uri: str,
+    source_note: str,
+    context: str = None,
+) -> Optional[str]:
+    """Create a vault note for a newly discovered entity.
+
+    Follows the personal-koi-mcp entity note conventions:
+    - @type, name, uri in frontmatter
+    - mentionedIn array for bidirectional linking
+    - Don't overwrite existing notes
+    """
+    folder = type_to_folder(entity_type)
+    safe_name = entity_name.replace("/", "-").replace("\\", "-")
+    rel_path = f"{folder}/{safe_name}.md"
+
+    vault_base = os.getenv("VAULT_PATH", "/root/.openclaw/workspace/vault")
+    full_path = os.path.join(vault_base, rel_path)
+
+    if os.path.exists(full_path):
+        return rel_path
+
+    os.makedirs(os.path.dirname(full_path), exist_ok=True)
+
+    # Map @type to match skill conventions
+    SCHEMA_PREFIX_TYPES = {
+        "Person": '"schema:Person"',
+        "Organization": '"schema:Organization"',
+        "Location": '"schema:Place"',
+    }
+    at_type = SCHEMA_PREFIX_TYPES.get(entity_type, entity_type)
+
+    lines = [
+        "---",
+        f'"@type": {at_type}',
+        f'name: "{entity_name}"',
+        f'uri: "{entity_uri}"',
+        "mentionedIn:",
+        f'  - "[[{source_note}]]"',
+        "---",
+        "",
+        f"# {entity_name}",
+        "",
+    ]
+    if context:
+        lines.append(context)
+        lines.append("")
+
+    with open(full_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+
+    logger.info(f"Created entity vault note: {rel_path}")
+    return rel_path
+
+
+# =============================================================================
+# GitHub Sensor Endpoints (Phase 5.7)
+# =============================================================================
+
+@app.get("/github/status")
+async def github_status():
+    """Get GitHub sensor status and code entity counts."""
+    if not github_sensor:
+        return {"enabled": False, "message": "GitHub sensor not enabled"}
+    return await github_sensor.get_status()
+
+
+@app.post("/github/scan")
+async def github_trigger_scan(repo_name: Optional[str] = None):
+    """Manually trigger a GitHub scan."""
+    if not github_sensor:
+        raise HTTPException(status_code=503, detail="GitHub sensor not enabled")
+    return await github_sensor.trigger_scan(repo_name)
+
+
+class AddRepoRequest(BaseModel):
+    repo_url: str
+    repo_name: Optional[str] = None
+    branch: str = "main"
+
+
+@app.post("/github/repos")
+async def github_add_repo(request: AddRepoRequest):
+    """Add a repository to monitor."""
+    if not db_pool:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    # Derive repo_name from URL if not provided
+    repo_name = request.repo_name
+    if not repo_name:
+        # Extract "owner/repo" from URL
+        match = re.search(r'github\.com[/:]([^/]+/[^/.]+)', request.repo_url)
+        if match:
+            repo_name = match.group(1)
+        else:
+            repo_name = request.repo_url.split("/")[-1].replace(".git", "")
+
+    async with db_pool.acquire() as conn:
+        try:
+            row = await conn.fetchrow(
+                """INSERT INTO github_repos (repo_url, repo_name, branch)
+                   VALUES ($1, $2, $3)
+                   ON CONFLICT (repo_url) DO UPDATE SET
+                     branch=EXCLUDED.branch, status='active', updated_at=NOW()
+                   RETURNING id, repo_name, status""",
+                request.repo_url, repo_name, request.branch,
+            )
+            return {
+                "status": "added",
+                "repo_id": row["id"],
+                "repo_name": row["repo_name"],
+            }
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/github/files")
+async def github_list_files(repo_name: Optional[str] = None, limit: int = 100):
+    """List tracked files from GitHub sensor."""
+    if not db_pool:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    async with db_pool.acquire() as conn:
+        if repo_name:
+            rows = await conn.fetch(
+                """SELECT fs.file_path, fs.content_hash, fs.line_count, fs.byte_size,
+                          fs.file_type, fs.code_entity_count, fs.scanned_at,
+                          r.repo_name
+                   FROM github_file_state fs
+                   JOIN github_repos r ON r.id = fs.repo_id
+                   WHERE r.repo_name = $1
+                   ORDER BY fs.file_path
+                   LIMIT $2""",
+                repo_name, limit,
+            )
+        else:
+            rows = await conn.fetch(
+                """SELECT fs.file_path, fs.content_hash, fs.line_count, fs.byte_size,
+                          fs.file_type, fs.code_entity_count, fs.scanned_at,
+                          r.repo_name
+                   FROM github_file_state fs
+                   JOIN github_repos r ON r.id = fs.repo_id
+                   ORDER BY r.repo_name, fs.file_path
+                   LIMIT $1""",
+                limit,
+            )
+
+    return {
+        "files": [dict(r) for r in rows],
+        "count": len(rows),
+    }
+
+
+class CodeQueryRequest(BaseModel):
+    cypher: str = "MATCH (n) RETURN labels(n), count(n)"
+
+
+@app.post("/code/query")
+async def code_graph_query(request: CodeQueryRequest):
+    """Run a Cypher query against the code knowledge graph."""
+    if not db_pool:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    try:
+        from api.code_graph import query_code_graph
+        async with db_pool.acquire() as conn:
+            results = await query_code_graph(conn, request.cypher)
+        return {"results": results, "count": len(results)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":

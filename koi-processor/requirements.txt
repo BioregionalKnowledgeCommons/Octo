@@ -28,6 +28,11 @@ pyyaml==6.0.1
 rid-lib>=3.2.8
 cryptography>=42.0
 
+# Code parsing (GitHub sensor)
+tree-sitter>=0.21.0
+tree-sitter-python>=0.21.0
+tree-sitter-typescript>=0.21.0
+
 # Logging
 colorlog==6.8.0
 loguru==0.7.2
