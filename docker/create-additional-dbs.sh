@@ -8,6 +8,8 @@
 
 CONTAINER="regen-koi-postgres"
 PSQL="docker exec -i $CONTAINER psql -U postgres"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 create_koi_db() {
   local DB_NAME=$1
@@ -30,7 +32,12 @@ EOF
 
   # Bootstrap predicates
   echo "Bootstrapping predicates for $DB_NAME..."
-  cat /root/koi-processor/migrations/038_bkc_predicates.sql | $PSQL -d "$DB_NAME"
+  PREDICATE_SQL="$REPO_DIR/koi-processor/migrations/038_bkc_predicates.sql"
+  if [ -f "$PREDICATE_SQL" ]; then
+    cat "$PREDICATE_SQL" | $PSQL -d "$DB_NAME"
+  else
+    echo "  Warning: $PREDICATE_SQL not found, skipping predicate bootstrap"
+  fi
 
   echo "$DB_NAME ready."
 }
