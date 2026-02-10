@@ -140,7 +140,10 @@ Edges are configured via API calls or database inserts. See [Federation Setup](#
 ssh root@YOUR_IP
 
 apt update && apt upgrade -y
-apt install -y git curl wget build-essential python3.12 python3.12-venv python3-pip
+apt install -y git curl wget build-essential python3 python3-venv python3-pip
+
+# Verify Python 3.12+ is available (Ubuntu 24.04 ships with 3.12)
+python3 --version
 
 # Docker
 curl -fsSL https://get.docker.com | sh
@@ -149,7 +152,7 @@ curl -fsSL https://get.docker.com | sh
 curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
 apt install -y nodejs
 
-# OpenClaw
+# OpenClaw (AI chat runtime — needed for Step 10)
 npm install -g openclaw
 ```
 
@@ -165,10 +168,11 @@ git clone https://github.com/DarrenZal/Octo.git
 ```bash
 cd /root/Octo/docker
 
-# Set a strong password
+# Generate a strong password and save it
 export POSTGRES_PASSWORD=$(openssl rand -hex 16)
 echo "POSTGRES_PASSWORD=$POSTGRES_PASSWORD" >> ~/.env
-echo "Save this password: $POSTGRES_PASSWORD"
+echo "Your PostgreSQL password is: $POSTGRES_PASSWORD"
+echo "(Saved to ~/.env — retrieve later with: cat ~/.env)"
 
 docker compose up -d
 
@@ -177,64 +181,94 @@ sleep 10
 docker exec regen-koi-postgres pg_isready -U postgres
 ```
 
-### Step 4: Create your database
+### Step 4: Pick your names
 
-Pick a short name for your node's database. The convention is `{shortname}_koi` — for example:
+Before going further, choose a **short name** for your node. This name is used for your database, directory, config file, and systemd service. The convention is lowercase, hyphenated:
 
-| Node | Database name |
-|---|---|
-| Cowichan Valley | `cv_koi` |
-| Front Range | `fr_koi` |
-| Boulder Creek | `boulder_koi` |
+| Node | Short name | Database | Directory | Config file | systemd service | KOI node name |
+|---|---|---|---|---|---|---|
+| Cowichan Valley | `cv` | `cv_koi` | `/root/cv-agent/` | `cv.env` | `cv-koi-api` | `cowichan-valley` |
+| Front Range | `fr` | `fr_koi` | `/root/fr-agent/` | `fr.env` | `fr-koi-api` | `front-range` |
+| Boulder Creek | `boulder` | `boulder_koi` | `/root/boulder-agent/` | `boulder.env` | `boulder-koi-api` | `boulder-creek` |
 
-Use this name everywhere in the remaining steps (env file, migrations, queries).
+**In all commands below, we use `cv` / `cv_koi` / `cv-agent` as the example. Replace these with your chosen names.**
+
+### Step 5: Create your database and agent directory
 
 ```bash
-# Example for Cowichan Valley — replace cv_koi with your chosen name
+# Create the database (replace cv_koi with your database name from Step 4)
 bash /root/Octo/docker/create-additional-dbs.sh cv_koi
+
+# Create your agent directory (replace cv-agent with your name from Step 4)
+mkdir -p /root/cv-agent/{config,workspace,vault}
+
+# Create vault subdirectories for each entity type
+mkdir -p /root/cv-agent/vault/{Bioregions,Practices,Patterns,Organizations,Projects,Concepts,People,Locations,CaseStudies,Protocols,Playbooks,Questions,Claims,Evidence,Sources}
 ```
 
-### Step 5: Set up the KOI Processor
+### Step 6: Set up the KOI Processor
 
 ```bash
 cd /root/Octo/koi-processor
 
 # Python virtualenv
-python3.12 -m venv venv
+python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 
-# Create your config from the template
+# Create your config from the template (replace cv.env with your name)
 cp config/personal.env.example config/cv.env
 ```
 
-Edit `config/cv.env`:
+Now edit the config file. You'll need the PostgreSQL password you saved in Step 3 (check `cat ~/.env` if you forgot it):
+
+```bash
+nano config/cv.env
+```
+
+Fill in these values — replace everything in `<angle brackets>` with your actual values:
 
 ```env
-# PostgreSQL
+# PostgreSQL — password is from Step 3 (check: cat ~/.env)
 DB_HOST=localhost
 DB_PORT=5432
-DB_NAME=cv_koi
+DB_NAME=<your-db-name>
 DB_USER=postgres
-DB_PASSWORD=<your-postgres-password-from-step-3>
+DB_PASSWORD=<your-postgres-password>
 
-# OpenAI (for semantic entity resolution)
-OPENAI_API_KEY=sk-...
+# OpenAI (for semantic entity resolution — get a key at https://platform.openai.com/api-keys)
+OPENAI_API_KEY=<your-openai-api-key>
 EMBEDDING_MODEL=text-embedding-3-small
 
-# Vault
-VAULT_PATH=/root/cv-agent/vault
+# Vault — must match the directory you created in Step 5
+VAULT_PATH=/root/<your-shortname>-agent/vault
 
 # KOI-net federation
 KOI_NET_ENABLED=true
-KOI_NODE_NAME=cowichan-valley
+KOI_NODE_NAME=<your-node-name>
 KOI_STATE_DIR=/root/koi-state
 
 # API
 KOI_API_PORT=8351
 ```
 
-Run migrations:
+**Example** for Cowichan Valley — a filled-in version would look like:
+
+```env
+DB_NAME=cv_koi
+DB_PASSWORD=a1b2c3d4e5f6...
+OPENAI_API_KEY=sk-proj-abc123...
+VAULT_PATH=/root/cv-agent/vault
+KOI_NODE_NAME=cowichan-valley
+```
+
+Copy the config to your agent directory:
+
+```bash
+cp config/cv.env /root/cv-agent/config/cv.env
+```
+
+Run migrations (replace `cv_koi` with your database name in every line):
 
 ```bash
 source config/cv.env
@@ -258,24 +292,19 @@ cat migrations/041_cross_references.sql | docker exec -i regen-koi-postgres psql
 cat migrations/042_web_submissions.sql | docker exec -i regen-koi-postgres psql -U postgres -d cv_koi
 ```
 
-### Step 6: Create your agent identity
+Each migration should print `CREATE TABLE` or similar — if you see errors, check your database name.
+
+### Step 7: Create your agent identity
+
+Your agent needs workspace files that ground it in your bioregion. Create these using `nano` (or any text editor).
+
+#### `IDENTITY.md`
 
 ```bash
-mkdir -p /root/cv-agent/{config,workspace,vault}
-
-# Copy your env file
-cp /root/Octo/koi-processor/config/cv.env /root/cv-agent/config/cv.env
+nano /root/cv-agent/workspace/IDENTITY.md
 ```
 
-Create vault directories:
-
-```bash
-mkdir -p /root/cv-agent/vault/{Bioregions,Practices,Patterns,Organizations,Projects,Concepts,People,Locations,CaseStudies,Protocols,Playbooks,Questions,Claims,Evidence,Sources}
-```
-
-#### `workspace/IDENTITY.md`
-
-Write an identity file grounded in your bioregion. Example for Cowichan Valley:
+Write something like this, adapted for your bioregion:
 
 ```markdown
 # IDENTITY.md — Cowichan Valley Knowledge Agent
@@ -310,7 +339,13 @@ peoples. The bioregion includes:
 - Cross-bioregional patterns are Octo's responsibility
 ```
 
-#### `workspace/SOUL.md`
+Save and exit (`Ctrl+O`, `Enter`, `Ctrl+X` in nano).
+
+#### `SOUL.md`
+
+```bash
+nano /root/cv-agent/workspace/SOUL.md
+```
 
 ```markdown
 # SOUL.md — Cowichan Valley Node Values
@@ -332,6 +367,8 @@ communities doing the work.
 ```
 
 #### Seed your first bioregion entity
+
+This creates a vault note for your bioregion (replace the name, description, and details with your own):
 
 ```bash
 cat > /root/cv-agent/vault/Bioregions/Cowichan\ Valley.md << 'EOF'
@@ -358,7 +395,13 @@ EOF
 
 #### Seed 2-3 practices
 
-Create Markdown files in `/root/cv-agent/vault/Practices/`. Template:
+Create a Markdown file for each practice your community does. Use `nano` or `cat >`:
+
+```bash
+nano /root/cv-agent/vault/Practices/Your\ Practice\ Name.md
+```
+
+Template:
 
 ```markdown
 ---
@@ -377,7 +420,9 @@ tags:
 Description of the practice. What is it? Who does it? Why does it matter?
 ```
 
-### Step 7: Create systemd service
+### Step 8: Create systemd service
+
+Replace `cv-koi-api`, `cv-agent`, and `cv.env` in the service file below with your names from Step 4:
 
 ```bash
 cat > /etc/systemd/system/cv-koi-api.service << 'EOF'
@@ -404,38 +449,46 @@ systemctl enable cv-koi-api
 systemctl start cv-koi-api
 ```
 
-Verify:
+Verify it's running:
 
 ```bash
 sleep 5
 curl -s http://127.0.0.1:8351/health | python3 -m json.tool
 ```
 
-### Step 8: Seed entities
+You should see a JSON response with `"status": "ok"`. If you get "Connection refused", check logs: `journalctl -u cv-koi-api -n 50`
+
+### Step 9: Seed entities
+
+This registers all the vault notes you created (bioregion, practices) into the database:
 
 ```bash
 bash /root/Octo/scripts/seed-vault-entities.sh http://127.0.0.1:8351 /root/cv-agent/vault
 ```
 
-### Step 9: Set up OpenClaw (chat agent)
+### Step 10: Set up OpenClaw (chat agent)
+
+> **Skip this step** if you only want the knowledge backend (no chat). Jump to [Step 11](#step-11-connect-to-octo-via-koi-net).
+
+Initialize OpenClaw — this creates `~/.openclaw/` and walks you through setup:
 
 ```bash
-# Initialize OpenClaw
 openclaw init
-
-# Follow the interactive setup to configure:
-#   - Model provider (google-antigravity recommended)
-#   - Telegram bot token (if using Telegram)
 ```
 
-Copy workspace files and link vault:
+During setup, you'll be asked for:
+- **Model provider**: Choose your LLM provider (e.g., google-antigravity for Claude via Google)
+- **API key**: Your LLM provider API key
+- **Telegram bot token**: If you want a Telegram channel (get one from [@BotFather](https://t.me/BotFather))
+
+After init, copy your workspace files and link your vault (replace `cv-agent` with your agent directory):
 
 ```bash
 cp /root/cv-agent/workspace/*.md /root/.openclaw/workspace/
 ln -s /root/cv-agent/vault /root/.openclaw/workspace/vault
 ```
 
-Install the bioregional-koi plugin:
+Install the bioregional-koi plugin (gives the agent knowledge graph tools):
 
 ```bash
 mkdir -p /root/bioregional-koi
@@ -443,13 +496,15 @@ cp /root/Octo/plugins/bioregional-koi/openclaw.plugin.json /root/bioregional-koi
 cp /root/Octo/plugins/bioregional-koi/index.ts /root/bioregional-koi/
 ```
 
-Start OpenClaw:
+Start the agent:
 
 ```bash
 openclaw gateway start
 ```
 
-### Step 10: Connect to Octo via KOI-net
+Test it by sending a message in your Telegram/Discord channel. The agent should respond.
+
+### Step 11: Connect to Octo via KOI-net
 
 See [Federation Setup](#federation-setup) below.
 
@@ -566,7 +621,7 @@ bash create-additional-dbs.sh personal_koi
 
 # Set up KOI Processor
 cd ../koi-processor
-python3.12 -m venv venv
+python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 
@@ -671,7 +726,7 @@ bash create-additional-dbs.sh your_koi
 git clone https://github.com/DarrenZal/Octo.git ~/Octo
 cd ~/Octo/koi-processor
 
-python3.12 -m venv venv
+python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 ```
