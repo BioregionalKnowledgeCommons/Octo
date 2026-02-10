@@ -313,6 +313,68 @@ fi
 info "Seeding bioregion entity into database..."
 bash "$OCTO_DIR/scripts/seed-vault-entities.sh" "http://127.0.0.1:$API_PORT" "$AGENT_DIR/vault" 2>/dev/null || true
 
+# ─── Federation Setup ───
+header "Federation Setup"
+
+# Get node RID
+NODE_RID=$(curl -s "http://127.0.0.1:$API_PORT/koi-net/health" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('node_rid',''))" 2>/dev/null || echo "")
+PUBLIC_IP=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || echo "")
+
+if [ "$NODE_TYPE_NUM" = "3" ]; then
+  info "Personal/research node — skipping federation (you can set it up later)"
+else
+  echo "Do you want to connect this node to the Salish Sea network (Octo coordinator)?"
+  echo "  This lets your node exchange knowledge with the broader network."
+  echo ""
+  read -rp "  Set up federation now? (Y/n) " FED_CONFIRM
+
+  if [[ "${FED_CONFIRM,,}" != "n" ]]; then
+    # Coordinator defaults (Octo / Salish Sea)
+    COORD_RID="orn:koi-net.node:octo-salish-sea+50a3c9eac05c807f"
+    COORD_NAME="octo-salish-sea"
+    COORD_URL="http://45.132.245.30:8351"
+
+    echo ""
+    echo "  Default coordinator: Octo (Salish Sea) at 45.132.245.30"
+    read -rp "  Use default? (Y/n) " COORD_CONFIRM
+
+    if [[ "${COORD_CONFIRM,,}" == "n" ]]; then
+      read -rp "  Coordinator node RID: " COORD_RID
+      read -rp "  Coordinator name: " COORD_NAME
+      read -rp "  Coordinator URL (e.g. http://1.2.3.4:8351): " COORD_URL
+    fi
+
+    # Edge RID: shortname-polls-coordinator
+    EDGE_RID="orn:koi-net.edge:${NODE_SLUG}-polls-${COORD_NAME}"
+    RID_TYPES="{Practice,Pattern,CaseStudy,Bioregion}"
+
+    PSQL_FED="docker exec -i regen-koi-postgres psql -U postgres -d $DB_NAME"
+
+    # Register coordinator as known node
+    info "Registering coordinator node..."
+    echo "INSERT INTO koi_net_nodes (node_rid, node_name, node_type, base_url, status, last_seen) VALUES ('$COORD_RID', '$COORD_NAME', 'FULL', '$COORD_URL', 'active', now()) ON CONFLICT (node_rid) DO NOTHING;" | $PSQL_FED &>/dev/null
+    ok "Coordinator registered: $COORD_NAME"
+
+    # Create edge: this node polls the coordinator
+    info "Creating federation edge..."
+    echo "INSERT INTO koi_net_edges (edge_rid, source_node, target_node, edge_type, status, rid_types) VALUES ('$EDGE_RID', '$NODE_RID', '$COORD_RID', 'POLL', 'APPROVED', '$RID_TYPES') ON CONFLICT (edge_rid) DO NOTHING;" | $PSQL_FED &>/dev/null
+    ok "Edge created: $NODE_SLUG polls $COORD_NAME"
+
+    # Check if port is open
+    if [ -n "$PUBLIC_IP" ]; then
+      info "Checking if port $API_PORT is reachable from outside..."
+      if curl -s --max-time 5 "http://$PUBLIC_IP:$API_PORT/health" &>/dev/null; then
+        ok "Port $API_PORT is open and reachable"
+      else
+        warn "Port $API_PORT may not be open. Make sure your firewall allows it:"
+        echo "     ufw allow $API_PORT/tcp"
+      fi
+    fi
+
+    FEDERATION_DONE=true
+  fi
+fi
+
 # ─── Summary ───
 header "Setup Complete!"
 
@@ -325,12 +387,39 @@ echo "  Agent directory:  $AGENT_DIR"
 echo "  Config file:      $ENV_FILE"
 echo "  systemd service:  $SERVICE_NAME"
 echo "  API URL:          http://127.0.0.1:$API_PORT"
-echo ""
-
-# Get node RID if KOI-net is enabled
-NODE_RID=$(curl -s "http://127.0.0.1:$API_PORT/koi-net/health" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('node_rid',''))" 2>/dev/null || echo "")
 if [ -n "$NODE_RID" ]; then
   echo "  Node RID:         $NODE_RID"
+fi
+if [ -n "$PUBLIC_IP" ]; then
+  echo "  Public IP:        $PUBLIC_IP"
+fi
+echo ""
+
+if [ "${FEDERATION_DONE:-}" = "true" ]; then
+  echo -e "${GREEN}Federation (your side) is configured.${NC}"
+  echo ""
+  echo "The coordinator still needs to register your node. Send them this one-liner:"
+  echo ""
+  echo -e "${BOLD}────────────────── copy this ──────────────────${NC}"
+  echo ""
+  echo "  docker exec -i regen-koi-postgres psql -U postgres -d octo_koi <<'SQL'"
+  echo "  INSERT INTO koi_net_nodes (node_rid, node_name, node_type, base_url, status, last_seen)"
+  echo "    VALUES ('$NODE_RID', '$NODE_SLUG', 'FULL', 'http://$PUBLIC_IP:$API_PORT', 'active', now())"
+  echo "    ON CONFLICT (node_rid) DO NOTHING;"
+  echo "  INSERT INTO koi_net_edges (edge_rid, source_node, target_node, edge_type, status, rid_types)"
+  echo "    VALUES ('$EDGE_RID', '$NODE_RID', '$COORD_RID', 'POLL', 'APPROVED', '$RID_TYPES')"
+  echo "    ON CONFLICT (edge_rid) DO NOTHING;"
+  echo "  SQL"
+  echo ""
+  echo -e "${BOLD}────────────────────────────────────────────────${NC}"
+  echo ""
+else
+  echo "To connect to the network later, send the coordinator your:"
+  echo "  - Server IP:  ${PUBLIC_IP:-<your-ip>}"
+  echo "  - API port:   $API_PORT"
+  if [ -n "$NODE_RID" ]; then
+    echo "  - Node RID:   $NODE_RID"
+  fi
   echo ""
 fi
 
@@ -349,13 +438,6 @@ echo "     bash $OCTO_DIR/scripts/seed-vault-entities.sh http://127.0.0.1:$API_P
 echo ""
 echo "  4. Set up OpenClaw chat agent (optional):"
 echo "     See docs/join-the-network.md → Step 10"
-echo ""
-echo "  5. Connect to the network — send Darren your:"
-echo "     - Server IP:  $(curl -s ifconfig.me 2>/dev/null || echo '<your-ip>')"
-echo "     - API port:   $API_PORT"
-if [ -n "$NODE_RID" ]; then
-  echo "     - Node RID:   $NODE_RID"
-fi
 echo ""
 echo "Useful commands:"
 echo "  systemctl status $SERVICE_NAME    # Check service"

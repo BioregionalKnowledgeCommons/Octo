@@ -871,18 +871,45 @@ This section applies to **all paths** once your node is running and you want to 
 5. Both nodes begin polling each other for events
 6. Events are signed with ECDSA envelopes — each node verifies the sender's identity
 
-### What you need to provide
+### Automated setup (recommended)
 
-Send these to Darren (or whoever runs the coordinator you're connecting to):
+If you used the setup wizard (`scripts/setup-node.sh`), federation was offered as part of the setup. The wizard:
 
-1. **Your server's IP address** (or domain name)
-2. **Your KOI API port** (default 8351)
-3. **Your Node RID** — get it from:
-   ```bash
-   curl -s http://127.0.0.1:8351/koi-net/health | python3 -m json.tool
-   ```
-4. **Your preferred relationship** — leaf (you share upstream) or peer (bidirectional exchange)
-5. **What entity types you want to share/receive**
+1. Registers the coordinator (Octo) as a known node on your side
+2. Creates the edge (your node polls the coordinator)
+3. Checks if your API port is reachable from outside
+4. **Prints a one-liner** for the coordinator to run on their side
+
+Copy that one-liner and send it to the coordinator (Darren for Salish Sea). Once they run it, both sides are wired up and knowledge starts flowing.
+
+### Manual setup
+
+If you didn't use the wizard, or are connecting to a different coordinator:
+
+**On your node** — register the coordinator and create the edge:
+
+```bash
+# Replace YOUR_DB with your database name (e.g. cv_koi)
+# Replace YOUR_NODE_RID with your node RID from: curl -s http://127.0.0.1:8351/koi-net/health
+
+docker exec -i regen-koi-postgres psql -U postgres -d YOUR_DB <<'SQL'
+-- Register Octo (Salish Sea coordinator)
+INSERT INTO koi_net_nodes (node_rid, node_name, node_type, base_url, status, last_seen)
+  VALUES ('orn:koi-net.node:octo-salish-sea+50a3c9eac05c807f', 'octo-salish-sea', 'FULL',
+          'http://45.132.245.30:8351', 'active', now())
+  ON CONFLICT (node_rid) DO NOTHING;
+
+-- Create edge: your node polls Octo for practices/patterns/case studies/bioregions
+INSERT INTO koi_net_edges (edge_rid, source_node, target_node, edge_type, status, rid_types)
+  VALUES ('orn:koi-net.edge:YOUR-SLUG-polls-octo-salish-sea',
+          'YOUR_NODE_RID',
+          'orn:koi-net.node:octo-salish-sea+50a3c9eac05c807f',
+          'POLL', 'APPROVED', '{Practice,Pattern,CaseStudy,Bioregion}')
+  ON CONFLICT (edge_rid) DO NOTHING;
+SQL
+```
+
+**Then send the coordinator** your IP, port, and Node RID so they can register your node on their side.
 
 ### What happens on both sides
 
@@ -903,7 +930,7 @@ Send these to Darren (or whoever runs the coordinator you're connecting to):
 # Check KOI-net health (shows your node RID, peer count, event stats)
 curl -s http://127.0.0.1:8351/koi-net/health | python3 -m json.tool
 
-# Check for received events
+# Check for received events (replace your_koi with your database name)
 docker exec regen-koi-postgres psql -U postgres -d your_koi -c \
   "SELECT COUNT(*) FROM koi_net_events"
 
