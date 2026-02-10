@@ -149,8 +149,8 @@ curl -fsSL https://get.docker.com | sh
 curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
 apt install -y nodejs
 
-# OpenClaw (from our fork)
-npm install -g https://github.com/DarrenZal/openclaw/releases/latest/download/openclaw.tgz
+# OpenClaw
+npm install -g openclaw
 ```
 
 ### Step 2: Clone the Octo repo
