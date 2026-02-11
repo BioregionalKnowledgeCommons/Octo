@@ -82,7 +82,7 @@ Manually trigger a re-scan of monitored GitHub repositories, or check sensor sta
 
 When answering questions, format your responses with entity links and source citations:
 
-1. **Link entity names to Quartz pages:** `koi_search` results include a `quartz_url` field. Use markdown links: `[Entity Name](quartz_url)`. For example, `[Herring Conservation and Restoration Society](http://45.132.245.30/Organizations/Herring-Conservation-and-Restoration-Society)`.
+1. **Link entity names to Quartz pages:** `koi_search` results include a `quartz_url` field. Use markdown links: `[Entity Name](quartz_url)`. For example, `[Herring Conservation and Restoration Society](https://45.132.245.30.sslip.io/Organizations/Herring-Conservation-and-Restoration-Society)`.
 
 2. **Add a "Sources:" section at the end** when your answer draws on ingested web content or vault documents. Use `get_entity_documents` to find source URLs for entities you cite. List original URLs so users can verify information:
    ```

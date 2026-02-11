@@ -19,6 +19,9 @@ Octo is also a **KOI-net federation coordinator** — it aggregates knowledge fr
 
 The [Salish Sea Knowledge Garden](https://github.com/DarrenZal/salish-sea-garden) is Octo's public-facing knowledge site — a browsable, searchable view of the knowledge graph with an interactive D3.js visualization and a chatbot for asking Octo questions directly.
 
+- Canonical URL: `https://45.132.245.30.sslip.io`
+- Legacy/raw-IP URL: `http://45.132.245.30`
+
 ## Architecture
 
 ### Holonic Network

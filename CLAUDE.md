@@ -7,6 +7,8 @@ Octo is a bioregional knowledge commoning agent built on OpenClaw, deployed on a
 ## Production Server
 
 - **Host:** `45.132.245.30`
+- **Public Site (canonical):** `https://45.132.245.30.sslip.io`
+- **Public Site (legacy/raw IP):** `http://45.132.245.30` (HTTPS on raw IP uses self-signed fallback cert)
 - **User:** `root`
 - **OS:** Ubuntu 24.04 LTS
 - **SSH:** `ssh root@45.132.245.30` (key-based auth configured)
@@ -20,7 +22,7 @@ Octo is a bioregional knowledge commoning agent built on OpenClaw, deployed on a
 | **GV KOI API** | systemd (`gv-koi-api.service`) | 8352 (localhost) | Greater Victoria leaf node, KOI-net enabled |
 | **PostgreSQL** | Docker (`regen-koi-postgres`) | 5432 (localhost) | pgvector + Apache AGE, multiple DBs |
 | **OpenClaw** | OpenClaw runtime (v2026.2.2-3) | — | Telegram + Discord channels |
-| **Quartz** | nginx + cron rebuild | 80 | Static knowledge site |
+| **Quartz** | nginx + cron rebuild | 80/443 | Static knowledge site (HTTPS on `45.132.245.30.sslip.io`) |
 | **Octo Chat** | systemd (`octo-chat.service`) | 3847 (localhost) | Chat API → OpenClaw agent |
 
 ### KOI-net Node Identities
@@ -121,7 +123,8 @@ Private keys stored at `/root/koi-state/{node_name}_private_key.pem`.
 
 ## Quartz Knowledge Site — "Salish Sea Knowledge Garden"
 
-**URL:** `http://45.132.245.30`
+**Canonical URL:** `https://45.132.245.30.sslip.io`
+**Legacy URL:** `http://45.132.245.30`
 
 Quartz renders Octo's vault as a browsable static site with wikilinks, backlinks, graph view, and full-text search.
 
@@ -130,8 +133,11 @@ Quartz renders Octo's vault as a browsable static site with wikilinks, backlinks
 ### Config
 - **nginx:** `/etc/nginx/sites-available/octo-quartz`
 - **Quartz config:** `/root/octo-quartz/quartz.config.ts`
+- **TLS cert deployment:** `/etc/nginx/ssl/octo-sslip-fullchain.pem` + `/etc/nginx/ssl/octo-sslip.key`
+- **ACME client:** `~/.acme.sh/acme.sh` (ZeroSSL)
 - **Landing page:** `/root/.openclaw/workspace/vault/index.md`
 - **Auto-rebuild:** Cron every 15 minutes → `/var/log/quartz-rebuild.log`
+- **Cert renew cron:** `34 0 * * * "/root/.acme.sh"/acme.sh --cron --home "/root/.acme.sh" > /dev/null`
 
 ### Manual rebuild
 ```bash
@@ -140,8 +146,8 @@ ssh root@45.132.245.30 "/root/octo-quartz/rebuild.sh"
 
 ### Update domain (when ready)
 1. Edit `baseUrl` in `/root/octo-quartz/quartz.config.ts`
-2. Update `server_name` in `/etc/nginx/sites-available/octo-quartz`
-3. Rebuild and restart: `/root/octo-quartz/rebuild.sh && systemctl restart nginx`
+2. Issue/install cert for new host via ACME and update nginx cert paths/server_name in `/etc/nginx/sites-available/octo-quartz`
+3. Rebuild and reload: `/root/octo-quartz/rebuild.sh && systemctl reload nginx`
 
 ## Common Operations
 

@@ -63,6 +63,10 @@ When you learn about **new entities** (people, organizations, projects) through 
 - Use the **knowledge graph** for specific entities, relationships, and cross-referencing
 - They complement each other: KNOWLEDGE.md has the narrative, the graph has the structure
 
+### Public Website Link Policy
+- When sharing Octo's site, use the canonical URL: `https://45.132.245.30.sslip.io`
+- Only share `http://45.132.245.30` as a legacy fallback if explicitly needed
+
 
 
 ## Memory
