@@ -312,14 +312,18 @@ BlockScience defines `ErrorType` enum (snake_case values):
 
 ## 5. Production Federation Topology
 
-| Node | RID (truncated) | Internal URL | Peer-Reachable URL | Status |
-|------|-----------------|-------------|-------------------|--------|
-| **Octo** | `octo-salish-sea+50a3c9ea...` | `http://127.0.0.1:8351` | `http://45.132.245.30:8351` (nginx gateway) | Live, federated |
-| **GV** | `greater-victoria+81ec47d8...` | `http://127.0.0.1:8352` | None (Octo-local only, same host) | Leaf, internal |
-| **Regen** | `koi-coordinator-main+c5ca332d...` | — | `https://regen.gaiaai.xyz/api/koi/coordinator` | Live, federated |
-| **Cowichan** | `cowichan-valley+52ae5cd1...` | — | `http://202.61.242.194:8351` | Leaf |
+| Node | RID (truncated) | Host | Peer-Reachable URL | Status |
+|------|-----------------|------|-------------------|--------|
+| **Octo** | `octo-salish-sea+50a3c9ea...` | `45.132.245.30` | `http://45.132.245.30:8351` (nginx gateway) | Live, coordinator |
+| **GV** | `greater-victoria+81ec47d8...` | `37.27.48.12` (poly) | `http://37.27.48.12:8351` | Live, leaf (remote) |
+| **Regen** | `koi-coordinator-main+c5ca332d...` | BlockScience | `https://regen.gaiaai.xyz/api/koi/coordinator` | Live, federated |
+| **Cowichan** | `cowichan-valley+52ae5cd1...` | `202.61.242.194` | `http://202.61.242.194:8351` | Leaf |
 
-**Note:** Peer-reachable URL is what's stored in `koi_net_nodes.base_url` and returned via `GET /koi-net/health`. The nginx gateway at `45.132.245.30:8351` proxies only `/koi-net/*` and `/health` paths to the internal Octo API.
+**Notes:**
+- Peer-reachable URL is what's stored in `koi_net_nodes.base_url` and returned via `GET /koi-net/health`.
+- The nginx gateway at `45.132.245.30:8351` proxies only `/koi-net/*` and `/health` paths to the internal Octo API.
+- GV migrated from Octo-local (`127.0.0.1:8352`) to remote on poly (`37.27.48.12:8351`) on 2026-02-18. Same keypair, RID preserved.
+- Port 8351 on poly is firewalled via iptables `KOI_FEDERATION` chain — only Octo (`45.132.245.30`) and CV (`202.61.242.194`) are allowed.
 
 ---
 
@@ -639,6 +643,7 @@ BlockScience defines `ErrorType` enum (snake_case values):
 | 2026-02-18 | P6: UPDATE-aware cross-ref upsert with re-resolution |
 | 2026-02-18 | P7: Resolution primitives module (exact, alias, fuzzy matching) |
 | 2026-02-18 | P8: WEBHOOK edge push delivery with key-refresh fallback, event dedup migration 047 |
+| 2026-02-18 | GV migrated from Octo-local (127.0.0.1:8352) to remote on poly (37.27.48.12:8351). 3-node topology verified. iptables firewall added on poly. |
 
 ### B. Architecture Comparison
 
@@ -677,9 +682,16 @@ curl -s http://127.0.0.1:8351/koi-net/health | python3 -m json.tool
 # Run full federation test
 bash ~/scripts/test-federation.sh
 
-# Deploy updated code
-scp koi-processor/api/*.py root@45.132.245.30:~/koi-processor/api/
+# Deploy updated code (Octo + GV)
+rsync -avz --delete koi-processor/api/ root@45.132.245.30:/root/koi-processor/api/
+rsync -avz --delete koi-processor/api/ root@37.27.48.12:/home/koi/koi-processor/api/
+ssh root@37.27.48.12 "chown -R koi:koi /home/koi/koi-processor"
 ssh root@45.132.245.30 "systemctl restart koi-api"
+ssh root@37.27.48.12 "systemctl restart gv-koi-api"
+
+# Stamp version on both servers after deploy
+git -C koi-processor rev-parse --short HEAD | ssh root@45.132.245.30 "cat > /root/koi-processor/.version"
+git -C koi-processor rev-parse --short HEAD | ssh root@37.27.48.12 "cat > /home/koi/koi-processor/.version"
 ```
 
 ### D. PyPI Package Adoption Status

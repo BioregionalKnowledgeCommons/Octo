@@ -232,8 +232,8 @@ async def enrich_entities(conn: asyncpg.Connection, limit: int = 50) -> int:
 async def main():
     parser = argparse.ArgumentParser(description="Regenerate stub entity vault notes")
     parser.add_argument("--db-url", required=True, help="PostgreSQL connection URL")
-    parser.add_argument("--vault-path", default="/root/.openclaw/workspace/vault",
-                        help="Path to vault directory")
+    parser.add_argument("--vault-path", default=os.getenv("VAULT_PATH"),
+                        help="Path to vault directory (or set VAULT_PATH env var)")
     parser.add_argument("--apply", action="store_true",
                         help="Actually write files (default is dry run)")
     parser.add_argument("--enrich", action="store_true",

@@ -20,7 +20,7 @@ Octo is a bioregional knowledge commoning agent built on OpenClaw, deployed on a
 |---------|------------|------|---------|
 | **Octo KOI API** | systemd (`koi-api.service`) | 8351 (localhost) | uvicorn, Python 3.12, KOI-net enabled |
 | **KOI Federation Gateway** | nginx (`octo-koi-net-8351`) | 8351 (public IP) | Proxies only `/koi-net/*` and `/health` to Octo API |
-| **GV KOI API** | systemd (`gv-koi-api.service`) | 8352 (localhost) | Greater Victoria leaf node, KOI-net enabled |
+| **GV KOI API** | **Remote** on `37.27.48.12` (poly) | 8351 (public) | Greater Victoria leaf node, migrated 2026-02-18 |
 | **PostgreSQL** | Docker (`regen-koi-postgres`) | 5432 (localhost) | pgvector + Apache AGE, multiple DBs |
 | **OpenClaw** | OpenClaw runtime (v2026.2.2-3) | — | Telegram + Discord channels |
 | **Quartz** | nginx + cron rebuild | 80/443 | Static knowledge site (HTTPS on `45.132.245.30.sslip.io`) |
@@ -39,6 +39,7 @@ Legacy `legacy16` RIDs (16 hex chars) still accepted during migration via `KOI_A
 > **RID migration complete (2026-02-18):** Node RIDs migrated from legacy16 (16-char) to b64_64 (64-char BlockScience canonical). Same keypairs, full SHA-256 hash suffix.
 
 Private keys stored at `/root/koi-state/{node_name}_private_key.pem`.
+GV's key is on poly at `/home/koi/koi-state/greater-victoria_private_key.pem`.
 
 ## File Layout on Server
 
@@ -71,13 +72,9 @@ Private keys stored at `/root/koi-state/{node_name}_private_key.pem`.
 │   │   └── test_koi_interop.py      # KOI-net protocol interop tests
 │   ├── requirements.txt
 │   └── venv/                        # Python virtualenv
-├── gv-agent/                   # Greater Victoria leaf node
-│   ├── config/gv.env               # GV-specific: DB=gv_koi, port=8352
-│   ├── workspace/                   # GV agent identity
-│   └── vault/                       # GV seed entities
+├── gv-agent/                   # Greater Victoria (LEGACY — GV now remote on poly, pending decommission)
 ├── koi-state/                  # Node identity keys
-│   ├── octo-salish-sea_private_key.pem
-│   └── greater-victoria_private_key.pem
+│   └── octo-salish-sea_private_key.pem
 ├── scripts/                    # Multi-agent management
 │   ├── manage-agents.sh
 │   ├── agents.conf
@@ -171,7 +168,7 @@ ssh root@45.132.245.30 "bash ~/scripts/manage-agents.sh status"
 ### KOI API health check
 ```bash
 ssh root@45.132.245.30 "curl -s http://127.0.0.1:8351/health"   # Octo
-ssh root@45.132.245.30 "curl -s http://127.0.0.1:8352/health"   # GV
+curl -s http://37.27.48.12:8351/health                           # GV (remote on poly)
 ```
 
 ### KOI-net health check
@@ -182,16 +179,28 @@ curl -s http://45.132.245.30:8351/koi-net/health   # Public KOI gateway path
 
 ### Restart agents (after code changes)
 ```bash
-ssh root@45.132.245.30 "bash ~/scripts/manage-agents.sh restart"
-# Or individually:
-ssh root@45.132.245.30 "systemctl restart koi-api"       # Octo
-ssh root@45.132.245.30 "systemctl restart gv-koi-api"    # GV
+ssh root@45.132.245.30 "systemctl restart koi-api"                # Octo
+ssh root@37.27.48.12 "sudo systemctl restart gv-koi-api"          # GV (remote on poly)
 ```
 
-### Deploy updated Python files
+### Deploy updated Python files (both servers)
 ```bash
-scp koi-processor/api/*.py root@45.132.245.30:~/koi-processor/api/
-ssh root@45.132.245.30 "bash ~/scripts/manage-agents.sh restart"
+# Sync to Octo
+rsync -avz --delete koi-processor/api/ root@45.132.245.30:/root/koi-processor/api/
+rsync -avz koi-processor/migrations/ root@45.132.245.30:/root/koi-processor/migrations/
+
+# Sync to GV (poly)
+rsync -avz --delete koi-processor/api/ root@37.27.48.12:/home/koi/koi-processor/api/
+rsync -avz koi-processor/migrations/ root@37.27.48.12:/home/koi/koi-processor/migrations/
+ssh root@37.27.48.12 "chown -R koi:koi /home/koi/koi-processor"
+
+# Restart both
+ssh root@45.132.245.30 "systemctl restart koi-api"
+ssh root@37.27.48.12 "systemctl restart gv-koi-api"
+
+# Stamp version
+git rev-parse --short HEAD | ssh root@45.132.245.30 "cat > /root/koi-processor/.version"
+git rev-parse --short HEAD | ssh root@37.27.48.12 "cat > /home/koi/koi-processor/.version"
 ```
 
 ### Deploy updated plugin + restart OpenClaw
@@ -271,12 +280,12 @@ ssh root@45.132.245.30 "docker exec regen-koi-postgres psql -U postgres -d octo_
 
 ## Databases
 
-All databases share one PostgreSQL container (`regen-koi-postgres`) with pgvector, Apache AGE, pg_trgm, fuzzystrmatch, uuid-ossp.
+Octo's databases are in the local PostgreSQL container (`regen-koi-postgres`). GV's database is on poly (`37.27.48.12`, container `gv-koi-postgres`, port 5433).
 
-| Database | Agent | Entities |
-|----------|-------|----------|
-| `octo_koi` | Octo (Salish Sea) | 70 |
-| `gv_koi` | Greater Victoria | 5 |
+| Database | Agent | Host | Entities |
+|----------|-------|------|----------|
+| `octo_koi` | Octo (Salish Sea) | `45.132.245.30` (local) | 70 |
+| `gv_koi` | Greater Victoria | `37.27.48.12` (poly, port 5433) | 5 |
 
 ### Key tables (per database)
 
@@ -301,11 +310,13 @@ All databases share one PostgreSQL container (`regen-koi-postgres`) with pgvecto
 
 ## Backups
 
-Automated via cron (daily at 3am CET):
-- **DB:** `pg_dump | gzip` → `/root/backups/{db_name}_YYYYMMDD.sql.gz` (both `octo_koi` and `gv_koi`)
+Automated via cron (daily at 3am CET) on Octo (`45.132.245.30`):
+- **DB:** `pg_dump | gzip` → `/root/backups/{db_name}_YYYYMMDD.sql.gz` (`octo_koi` only — `gv_koi` is on poly now)
 - **Vault:** `tar czf` → `/root/backups/vault_YYYYMMDD.tar.gz`
-- **Keys:** `tar czf` → `/root/backups/koi_state_YYYYMMDD.tar.gz` (node identity keys)
+- **Keys:** `tar czf` → `/root/backups/koi_state_YYYYMMDD.tar.gz` (Octo node identity key)
 - **Retention:** 7 days (old backups auto-deleted at 4am)
+
+> **TODO:** Set up automated backups for GV on poly (`37.27.48.12`). Currently GV's `gv_koi` DB is not being backed up automatically.
 
 ## BKC Ontology
 
@@ -337,7 +348,7 @@ The source files in this repo map to server paths:
 | `docker/` | `/root/koi-stack/` |
 | `scripts/` | `/root/scripts/` |
 | `systemd/` | `/etc/systemd/system/` |
-| `gv-agent/` | `/root/gv-agent/` |
+| `gv-agent/` | `/root/gv-agent/` (LEGACY — GV now on poly at `/home/koi/`) |
 | `workspace/` | `/root/.openclaw/workspace/` |
 | `plugins/bioregional-koi/` | `/root/bioregional-koi/` |
 | `vault-seed/` | `/root/.openclaw/workspace/vault/` (subset) |
@@ -360,29 +371,41 @@ The source files in this repo map to server paths:
 
 ## Current Status
 
-**Date:** 2026-02-09
-**Status:** HEALTHY — Ready for multi-agent expansion (CV + FR)
+**Date:** 2026-02-18
+**Status:** HEALTHY — 3-node cross-network federation active
 
 ### What's Done
 - Sprints 1-3 deployed: KOI-net federation working between Octo (coordinator) and GV (leaf)
-- Cleanup sprint complete: AGE extension bug, ensure_schema columns (phonetic_code, vault_rid, koi_rid), event confirmation e2e, cross-ref upgrade logic
+- **GV migrated to remote server** (2026-02-18): `37.27.48.12` (poly), port 8351, user `koi`, own PostgreSQL container (port 5433). Same keypair, RID preserved. 3-node topology: Octo + GV (remote) + CV (Shawn)
+- P0-P8 protocol alignment complete (93 tests, deployed)
+- Node RID migration to b64_64 (BlockScience canonical) complete
 - 70 entities in Octo across 14 types, seeded via `seed-vault-entities.sh`
-- Event confirmation flow working end-to-end (event_id added to WireEvent + poll response)
 - Cross-reference resolution verified: Herring Monitoring = `same_as` (confidence 1.0)
-- Interop tests 8/8 passing, federation test passing, both agents healthy (14% RAM)
-- Architecture updated: Cowichan Valley replaces Gulf Islands, Front Range added as peer network
-- Phase 5.7 planned: GitHub sensor for self-knowledge (adapt RegenAI sensor)
-- Test artifacts cleaned up (stale cross-refs + test entities removed from GV)
+- Cowichan Valley (Shawn's node) live at `202.61.242.194:8351`
+
+### GV Remote Node (poly)
+- **Host:** `37.27.48.12` (poly server, shared with AlgoTrading)
+- **SSH:** `ssh root@37.27.48.12` (or `koi` user for KOI work)
+- **Service:** `gv-koi-api.service` (systemd, runs as `koi` user)
+- **DB:** `gv_koi` in Docker container `gv-koi-postgres` on port 5433
+- **Code:** `/home/koi/koi-processor/`
+- **Vault:** `/home/koi/gv-agent/vault/`
+- **Key:** `/home/koi/koi-state/greater-victoria_private_key.pem`
+- **Env:** `/home/koi/gv-agent/config/gv.env`
+- **Logs:** `ssh root@37.27.48.12 "journalctl -u gv-koi-api -f"`
+- **Firewall:** iptables `KOI_FEDERATION` chain on poly — only Octo + CV IPs can reach port 8351. Persistent via `netfilter-persistent`.
+- **Version stamp:** `/home/koi/koi-processor/.version` (git SHA, stamped after each deploy)
+- **Rollback:** Old GV service masked on 45.132.245.30 (backup at `/root/backups/gv-koi-api.service.bak`). Decommission after 48h stable (~2026-02-20 20:00 UTC).
 
 ### What's Left
-1. **Launch Cowichan Valley + Front Range agents** — create agent dirs, databases, workspace files, systemd services, configure edges, test cross-references (Darren's friends will help seed practices)
-2. **Phase 5.7: GitHub sensor** — adapt `RegenAI/koi-sensors/sensors/github/` to index `DarrenZal/Octo` into Octo's KOI API for self-knowledge
+1. **Front Range agent** — create agent dir, database, workspace, systemd, edges
+2. **Phase 5.7: GitHub sensor** — adapt for self-knowledge
 3. **Phase 0.5: BKC CoIP vault audit** — blocked on access from Andrea Farias / Vincent Arena
 4. **Phase 5: Cascadia coordinator** — after CV is running, proves holon pattern
+5. **Decommission old GV** — after 48h stable (~2026-02-20 20:00 UTC): final health check, backup koi_net_nodes/edges + gv_koi dump, restore test, remove service+DB+agent dir from 45.132.245.30, smoke check all 3 nodes, retain backups 7+ days
 
 ### Open Questions
 - Front Range: connect to Octo directly for now (since Cascadia doesn't exist yet) or wait?
-- What practices will CV and FR friends seed? (they should prepare 2-3 each)
 
 ### Adding a New Agent (Quick Reference)
 

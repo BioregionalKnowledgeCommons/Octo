@@ -791,7 +791,7 @@ The plugin gives your OpenClaw agent these tools:
 - `code_query` — Cypher graph queries
 - `resolve_entity` — 3-tier entity resolution
 - `vault_read_note` / `vault_write_note` — read/write vault notes
-- `get_entity_relationships` — relationship queries
+- `get_entity_neighborhood` — relationship queries
 
 ### Step 5: Link your vault
 

@@ -56,7 +56,7 @@ Create or update entity notes in the vault.
 ### `resolve_entity` — Entity resolution
 Resolve a name to a canonical entity with deduplication (exact match → fuzzy → semantic → create new).
 
-### `get_entity_relationships` — Relationship queries
+### `get_entity_neighborhood` — Relationship queries
 Get typed relationships for an entity (who is affiliated with whom, what involves what).
 
 ### `get_entity_documents` — Document mentions

@@ -4324,7 +4324,9 @@ def _generate_source_vault_note(
     """
     import os as os_module
 
-    vault_base = os.getenv("VAULT_PATH", "/root/.openclaw/workspace/vault")
+    vault_base = os.getenv("VAULT_PATH")
+    if not vault_base:
+        raise ValueError("VAULT_PATH environment variable must be set")
     domain = submission["domain"]
     title = submission["title"] or domain
 
@@ -4419,7 +4421,9 @@ async def _generate_entity_vault_note(
     safe_name = entity_name.replace("/", "-").replace("\\", "-")
     rel_path = f"{folder}/{safe_name}.md"
 
-    vault_base = os.getenv("VAULT_PATH", "/root/.openclaw/workspace/vault")
+    vault_base = os.getenv("VAULT_PATH")
+    if not vault_base:
+        raise ValueError("VAULT_PATH environment variable must be set")
     full_path = os.path.join(vault_base, rel_path)
 
     if os.path.exists(full_path) and not overwrite:
