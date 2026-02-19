@@ -77,7 +77,7 @@ Each node runs the same KOI API codebase with its own database, vault, and ident
 | Agent | Port | Node RID | Entities | KOI-net |
 |-------|------|----------|----------|---------|
 | **Octo** (Salish Sea) | 8351 | `orn:koi-net.node:octo-salish-sea+50a3c...` | 57 | Enabled (coordinator) |
-| **Greater Victoria** | 8352 | `orn:koi-net.node:greater-victoria+81ec4...` | 4 | Enabled (leaf node) |
+| **Greater Victoria** | 37.27.48.12:8351 (remote, poly) | `orn:koi-net.node:greater-victoria+81ec4...` | 4 | Enabled (leaf node) |
 
 ## BKC Ontology
 
@@ -120,7 +120,7 @@ See [ontology/bkc-ontology.jsonld](ontology/bkc-ontology.jsonld) for the formal 
 │   ├── AGENTS.md           # Agent routing and session rules
 │   ├── TOOLS.md            # Environment-specific tool config
 │   └── HEARTBEAT.md        # Periodic check tasks
-├── gv-agent/               # Greater Victoria leaf node
+├── gv-agent/               # Greater Victoria leaf node (deployed on poly 37.27.48.12)
 │   ├── config/gv.env       # GV-specific env (DB, port, node name)
 │   ├── workspace/          # GV agent identity (IDENTITY.md, SOUL.md)
 │   └── vault/              # GV seed entities (Practices/, Bioregions/)
@@ -168,8 +168,8 @@ See [ontology/bkc-ontology.jsonld](ontology/bkc-ontology.jsonld) for the formal 
 │   └── bkc-ontology.jsonld
 ├── vault-seed/             # Seed entity notes exercising the full predicate chain
 ├── systemd/                # Service definitions
-│   ├── koi-api.service     # Octo (port 8351)
-│   └── gv-koi-api.service  # Greater Victoria (port 8352)
+│   ├── koi-api.service           # Octo (port 8351)
+│   └── koi-api.service.example  # Template for new leaf nodes
 └── docs/                   # Strategy and implementation plans
     ├── join-the-network.md
     ├── koi-alignment.md

@@ -1,0 +1,24 @@
+# KOI API Service Template
+# Copy and customize for each leaf node:
+#   - Description: <Node Name> KOI API
+#   - User: <service user>
+#   - WorkingDirectory: <path to koi-processor>
+#   - EnvironmentFile: <path to node env file>
+#   - ExecStart port: <unique port for this node>
+
+[Unit]
+Description=<Node Name> KOI API
+After=network.target docker.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/koi-processor
+Environment=PATH=/root/koi-processor/venv/bin:/usr/bin
+EnvironmentFile=/root/<node>-agent/config/<node>.env
+ExecStart=/root/koi-processor/venv/bin/uvicorn api.personal_ingest_api:app --host 127.0.0.1 --port 8351
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

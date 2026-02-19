@@ -14,6 +14,7 @@ import os
 import logging
 from base64 import b64encode
 from pathlib import Path
+from typing import Optional
 
 from api.koi_protocol import NodeProfile, NodeProvides
 
@@ -50,28 +51,38 @@ def generate_keypair():
     return private_key
 
 
-def save_private_key(private_key, path: Path):
-    """Save private key to PEM file."""
+def get_key_password() -> Optional[str]:
+    """Read private key password from PRIV_KEY_PASSWORD env var."""
+    return os.getenv("PRIV_KEY_PASSWORD")
+
+
+def save_private_key(private_key, path: Path, password: Optional[str] = None):
+    """Save private key to PEM file, optionally encrypted."""
     path.parent.mkdir(parents=True, exist_ok=True)
+    if password:
+        encryption = serialization.BestAvailableEncryption(password.encode())
+    else:
+        encryption = serialization.NoEncryption()
     pem = private_key.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.PKCS8,
-        encryption_algorithm=serialization.NoEncryption(),
+        encryption_algorithm=encryption,
     )
     path.write_bytes(pem)
     os.chmod(path, 0o600)
-    logger.info(f"Saved private key to {path}")
+    logger.info(f"Saved private key to {path} (encrypted={password is not None})")
 
 
-def load_private_key(path: Path):
-    """Load private key from PEM file."""
+def load_private_key(path: Path, password: Optional[str] = None):
+    """Load private key from PEM file, optionally decrypting."""
     if not _CRYPTO_AVAILABLE:
         return None
     if not path.exists():
         return None
+    password_bytes = password.encode() if password else None
     return serialization.load_pem_private_key(
         data=path.read_bytes(),
-        password=None,
+        password=password_bytes,
     )
 
 
@@ -147,18 +158,26 @@ def load_or_create_identity(
     node_name: str,
     base_url: str | None = None,
     node_type: str = "FULL",
+    password: str | None = None,
 ) -> tuple:
     """Load existing identity or create new one.
 
+    Args:
+        password: If provided, used to decrypt/encrypt the private key PEM.
+                  Reads from PRIV_KEY_PASSWORD env var if not passed explicitly.
+
     Returns (private_key, node_profile).
     """
+    if password is None:
+        password = get_key_password()
+
     key_file = _key_path(node_name)
 
-    private_key = load_private_key(key_file)
+    private_key = load_private_key(key_file, password=password)
     if private_key is None:
         logger.info(f"No existing key found at {key_file}, generating new keypair")
         private_key = generate_keypair()
-        save_private_key(private_key, key_file)
+        save_private_key(private_key, key_file, password=password)
     else:
         logger.info(f"Loaded existing key from {key_file}")
 

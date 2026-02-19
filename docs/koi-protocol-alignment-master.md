@@ -4,6 +4,7 @@
 > **Status:** Living document — update as phases complete.
 > **Created:** 2026-02-18 | **Author:** Darren Zal, with research from BlockScience source analysis
 > **See also:** [`koi-alignment.md`](./koi-alignment.md) — original gap analysis and phase plan
+> **Last session:** `53f588e3-a8ee-49b1-bd56-047b2c9bd7cb` (2026-02-19, GV decommission + next steps)
 
 ---
 
@@ -26,10 +27,11 @@
 | **P6** | UPDATE-Aware Cross-Ref Upsert | **COMPLETE** |
 | **P7** | Resolution Primitives + Multi-Tier Federation | **COMPLETE** |
 | **P8** | WEBHOOK Edge Push Delivery | **COMPLETE** |
+| **P9** | Private Key Encryption | **COMPLETE** |
 
 ### Test Coverage Matrix
 
-**93 pytest tests** (`test_koi_policy.py` 23 + `test_koi_conformance.py` 14 + `test_koi_pipeline.py` 39 + `test_resolution_primitives.py` 12 + `test_koi_conformance.py` 5 live-marked) + **11 interop checks** (`test_koi_interop.py`, script-based).
+**98 pytest tests** (`test_koi_policy.py` 28 + `test_koi_conformance.py` 14 + `test_koi_pipeline.py` 39 + `test_resolution_primitives.py` 12 + `test_koi_conformance.py` 5 live-marked) + **11 interop checks** (`test_koi_interop.py`, script-based).
 
 | Test Function | File | Capabilities Covered |
 |---------------|------|---------------------|
@@ -54,6 +56,13 @@
 | `test_manifest_hash_uses_jcs_not_json_dumps` | test_koi_policy.py:310 | JCS canonicalization, rid-lib dependency |
 | `test_manifest_hash_matches_blockscience_reference` | test_koi_policy.py:321 | JCS canonicalization, frozen reference vector |
 | `test_manifest_hash_deterministic_across_key_order` | test_koi_policy.py:334 | JCS canonicalization, key-order independence |
+| `test_node_profile_ontology_fields` | test_koi_policy.py | P5: NodeProfile ontology fields serialize correctly |
+| `test_node_profile_ontology_optional` | test_koi_policy.py | P5: Ontology fields are optional (backward compat) |
+| `test_save_and_load_encrypted_key` | test_koi_policy.py | P9: Encrypted key round-trip (save → load → sign → verify) |
+| `test_load_unencrypted_key_still_works` | test_koi_policy.py | P9: Unencrypted key backward compatibility |
+| `test_encrypted_key_derives_same_rid` | test_koi_policy.py | P9: Encryption preserves public key → same node RID |
+| `test_encrypted_key_wrong_password_fails` | test_koi_policy.py | P9: Wrong password raises clear error |
+| `test_encrypted_key_no_password_fails` | test_koi_policy.py | P9: Encrypted key without password raises error |
 
 #### Pipeline Tests (test_koi_pipeline.py)
 
@@ -232,7 +241,7 @@ BlockScience defines `ErrorType` enum (snake_case values):
 - Default hash mode: `b64_64` = `sha256(base64(DER(pubkey)))` — BlockScience canonical (`node_identity.py:85-99`)
 - Legacy `legacy16` = first 16 chars of b64_64 hash (`node_identity.py:100-102`)
 - `node_rid_matches_public_key()` accepts b64_64, legacy16, and der64 with per-mode allow flags (`node_identity.py:113-133`)
-- Key storage: `/root/koi-state/{node_name}_private_key.pem` — no password encryption (differs from BlockScience which requires `PRIV_KEY_PASSWORD`)
+- Key storage: `/root/koi-state/{node_name}_private_key.pem` — password encryption via `PRIV_KEY_PASSWORD` env var (matches BlockScience `secure.py`)
 
 ### 3.5 Event Queue
 
@@ -306,7 +315,7 @@ BlockScience defines `ErrorType` enum (snake_case values):
 | UPDATE differential logic | Low | P6 | **COMPLETE** | UPDATE-aware cross-ref upsert with re-resolution |
 | NodeProfile ontology fields | Low | P5 | **COMPLETE** | `ontology_uri`, `ontology_version` in NodeProfile + migration 046 |
 | Protocol surface docs | Low | P4 | **COMPLETE** | Core vs extension documented in health endpoint and master doc |
-| Private key encryption | Low | P9 | — | No password on PEM files; BlockScience requires `PRIV_KEY_PASSWORD` |
+| Private key encryption | Low | P9 | **COMPLETE** | `PRIV_KEY_PASSWORD` env var support, `BestAvailableEncryption`, migration script |
 
 ---
 
@@ -317,7 +326,7 @@ BlockScience defines `ErrorType` enum (snake_case values):
 | **Octo** | `octo-salish-sea+50a3c9ea...` | `45.132.245.30` | `http://45.132.245.30:8351` (nginx gateway) | Live, coordinator |
 | **GV** | `greater-victoria+81ec47d8...` | `37.27.48.12` (poly) | `http://37.27.48.12:8351` | Live, leaf (remote) |
 | **Regen** | `koi-coordinator-main+c5ca332d...` | BlockScience | `https://regen.gaiaai.xyz/api/koi/coordinator` | Live, federated |
-| **Cowichan** | `cowichan-valley+52ae5cd1...` | `202.61.242.194` | `http://202.61.242.194:8351` | Leaf |
+| **Cowichan** | `cowichan-valley+52ae5cd1...` | `202.61.242.194` | `http://202.61.242.194:8351` | Live, leaf |
 
 **Notes:**
 - Peer-reachable URL is what's stored in `koi_net_nodes.base_url` and returned via `GET /koi-net/health`.
@@ -467,7 +476,7 @@ BlockScience defines `ErrorType` enum (snake_case values):
 **Delivered (P3b — new handlers beyond parity):**
 - `block_self_referential` (RID phase, first in chain): Drops events where `kobj.rid == ctx.node_rid` from external sources. Matches BlockScience's `basic_rid_handler` (`default_handlers.py:20-27`). Guards against external peers overwriting our own node identity.
 - `entity_type_validator` (Bundle phase, before `cross_reference_resolver`): Logs debug message with RID context for unknown entity types. Permissive — no STOP_CHAIN. Complements existing WARNING in `get_schema_for_type()` with pipeline-specific context.
-- `broadcast_target_selector` (Network phase): **Deferred** — no outbound push mechanism exists yet; adding a handler that populates a field nothing reads is dead code. Will implement when WEBHOOK/push edges are added.
+- `broadcast_target_selector` (Network phase): **Deferred at P3 time** — WEBHOOK push was later implemented directly in `koi_poller.py` (P8) rather than as a pipeline handler. A pipeline-native Network phase handler remains a future cleanup option but is not functionally needed.
 - Updated DEFAULT_HANDLERS: 7 handlers total (4 RID, 2 Bundle, 1 Final)
 
 **Validation:**
@@ -560,6 +569,31 @@ BlockScience defines `ErrorType` enum (snake_case values):
 - [x] `test_40_webhook_key_refresh_on_missing` — missing key triggers refresh
 - [x] `test_41_webhook_key_refresh_on_stale` — stale key triggers refresh and retry
 
+### Phase P9: Private Key Encryption — COMPLETE
+
+**Goal:** Encrypt private keys at rest using `PRIV_KEY_PASSWORD` env var, matching BlockScience's `secure.py` pattern.
+
+**Delivered:**
+- `get_key_password()` reads `PRIV_KEY_PASSWORD` env var (`node_identity.py`)
+- `save_private_key()` accepts optional `password` param, uses `BestAvailableEncryption` when set (`node_identity.py`)
+- `load_private_key()` accepts optional `password` param, passes bytes to `load_pem_private_key` (`node_identity.py`)
+- `load_or_create_identity()` threads password through from env var (`node_identity.py`)
+- `koi_envelope.py` already had password support in `load_private_key_from_file()` — no changes needed
+- Migration script `scripts/encrypt_private_key.py` — encrypts existing PEM, creates `.unencrypted.bak`, verifies public key unchanged
+- Backward compatible: no `PRIV_KEY_PASSWORD` → `NoEncryption` (existing behavior preserved)
+
+**Deployment:**
+1. Deploy code with password support to all nodes (no key changes yet)
+2. Encrypt keys one node at a time: set `PRIV_KEY_PASSWORD` in env, run `encrypt_private_key.py`, restart service
+3. Rollback: `cp key.pem.unencrypted.bak key.pem`, remove env var, restart
+
+**Validation:**
+- [x] `test_save_and_load_encrypted_key` — encrypted round-trip with signing verification
+- [x] `test_load_unencrypted_key_still_works` — backward compat
+- [x] `test_encrypted_key_derives_same_rid` — encryption preserves node RID
+- [x] `test_encrypted_key_wrong_password_fails` — wrong password raises error
+- [x] `test_encrypted_key_no_password_fails` — missing password raises error
+
 ---
 
 ## 7. File Reference Tables
@@ -591,7 +625,8 @@ BlockScience defines `ErrorType` enum (snake_case values):
 | `koi-processor/api/koi_net_router.py` | Protocol endpoints, envelope unwrapping, security policy | 903 |
 | `koi-processor/api/koi_envelope.py` | ECDSA P-256 sign/verify, envelope models | 213 |
 | `koi-processor/api/koi_protocol.py` | Wire format models (Pydantic), request/response types | 181 |
-| `koi-processor/api/node_identity.py` | Keypair management, RID derivation, key-RID matching | 183 |
+| `koi-processor/api/node_identity.py` | Keypair management, RID derivation, key-RID matching, password encryption | 195 |
+| `koi-processor/scripts/encrypt_private_key.py` | Migration script: encrypt existing PEM with backup + verification | — |
 | `koi-processor/api/koi_poller.py` | Background polling, cross-reference resolution, WEBHOOK push, key-refresh fallback | 658 |
 | `koi-processor/api/event_queue.py` | DB-backed event queue, per-node delivery tracking | 202 |
 | `koi-processor/api/pipeline/__init__.py` | Pipeline package exports, lazy handler import | — |
@@ -647,6 +682,9 @@ BlockScience defines `ErrorType` enum (snake_case values):
 | 2026-02-18 | KOI Tool Contract v1.1.1 verified (76/76 contract tests, 8/8 manual checks, personal-koi-mcp pushed) |
 | 2026-02-18 | personal-koi-mcp extended to support all 14 BKC entity types in extraction/schema |
 | 2026-02-18 | Stabilization commit `05ee778` tagged `koi-gv-remote-stable` (Octo plugin fixes + GV remote migration) |
+| 2026-02-19 | Old GV decommissioned from Octo server: service, DB, cron removed. Final backups retained. |
+| 2026-02-19 | Automated GV backups on poly: `gv-backup.timer` (daily 3am) + `gv-backup-offhost.timer` (weekly Sun 4am → Octo). Restore tested. |
+| 2026-02-19 | P9: Private key encryption — `PRIV_KEY_PASSWORD` env var, `BestAvailableEncryption`, migration script, 5 tests |
 
 ### B. Architecture Comparison
 
@@ -658,7 +696,7 @@ BlockScience koi-net                    Octo
 │ Handler chain (5-phase) │    │ Handler chain (5-phase, P3)  │
 │ Cache-backed state      │    │ entity_registry + cross-refs │
 │ rid-lib first-class     │    │ rid-lib hard dep (hashing)   │
-│ Key storage: encrypted  │    │ Key storage: unencrypted PEM │
+│ Key storage: encrypted  │    │ Key storage: encrypted PEM   │
 └─────────────────────────┘    └─────────────────────────────┘
 ```
 
@@ -714,4 +752,46 @@ The system is considered aligned for production federation when all are true:
 4. Conformance tests pass against both Octo peers and BlockScience reference behavior for core 5 endpoints
 5. Extension endpoints are clearly documented as non-core protocol conveniences
 
-**Current status:** All 5 criteria met. P0–P8 complete. 93 pytest tests + 11 interop checks passing.
+**Current status:** All 5 criteria met. P0–P9 complete. 98 pytest tests + 11 interop checks passing.
+
+---
+
+## 9. Next Steps (as of 2026-02-19)
+
+### Completed This Session
+
+- **Old GV decommissioned from Octo server (`45.132.245.30`):**
+  - Final backups created: `/root/backups/gv_koi_final_20260219.sql.gz` (106K) + `gv_agent_final_20260219.tar.gz`
+  - Removed: `gv-koi-api.service`, `gv_koi` database, `/root/gv-agent/` directory, old private key
+  - GV on poly (`37.27.48.12`) confirmed healthy: 11h uptime, 0 errors, Octo polling every minute
+  - Updated repo files: `gv.env`, `CLAUDE.md`, `README.md`, `koi-api.service.example` — zero `8352` references remain in active files
+- **Automated GV backups on poly (`37.27.48.12`):**
+  - `gv-backup.timer`: Daily at 3am CET → `pg_dump -Fc` + vault tar + sha256 checksums, 7-day retention
+  - `gv-backup-offhost.timer`: Weekly Sun 4am → rsync `.dump` + `.tar.gz` to `root@45.132.245.30:/root/backups/poly-mirror/`
+  - Verified: backup runs in <1s, checksum validated, restore tested (5 entities confirmed), off-host copy confirmed
+- **P9 private key encryption (code):**
+  - `node_identity.py`: `get_key_password()`, `save_private_key(password=)`, `load_private_key(password=)`, `load_or_create_identity(password=)`
+  - `scripts/encrypt_private_key.py`: Migration script with `.unencrypted.bak` rollback and public key verification
+  - 5 new tests in `test_koi_policy.py` (round-trip, backward compat, RID preservation, wrong password, no password)
+
+### Ready to Pick Up
+
+1. **Front Range agent setup** — Highest priority remaining item. Needs:
+   - Agent directory + config (`fr-agent/config/fr.env`)
+   - Database (`fr_koi`) — decide host: Octo server or separate
+   - Workspace files (IDENTITY.md, SOUL.md for Front Range bioregion)
+   - systemd service
+   - KOI-net edges (connect to Octo as coordinator — Cascadia doesn't exist yet)
+   - Seed entities for Front Range bioregion
+
+2. **Phase 5.7: GitHub sensor** — Adapt for self-knowledge (Octo watches its own repos)
+
+3. **Phase 0.5: BKC CoIP vault audit** — Blocked on access from Andrea Farias / Vincent Arena
+
+4. **Phase 5: Cascadia coordinator** — After CV is running, proves holon pattern
+
+5. **Private key encryption deployment** — P9 code written but keys are not yet encrypted on production. Deploy code to all nodes first, then encrypt keys one at a time per the P9 deployment steps above.
+
+### Open Questions
+
+- Front Range: connect to Octo directly for now (since Cascadia coordinator doesn't exist yet) or wait?

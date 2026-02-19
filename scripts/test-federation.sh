@@ -2,24 +2,29 @@
 # End-to-end federation test: GV -> Octo
 #
 # Tests:
-# 1. Register a practice in GV (port 8352)
+# 1. Register a practice in GV (remote on poly)
 # 2. Verify event appears in GV's queue
 # 3. Wait for Octo's poller to pick up the event
-# 4. Verify cross-reference exists in Octo (port 8351)
+# 4. Verify cross-reference exists in Octo
 #
 # Prerequisites:
-#   - Both agents running (manage-agents.sh status)
+#   - Both agents running (GV on poly, Octo local)
 #   - KOI_NET_ENABLED=true on both
 #   - Edges configured between GV and Octo
 
 set -e
 
-OCTO_URL="http://127.0.0.1:8351"
-GV_URL="http://127.0.0.1:8352"
-PSQL="docker exec regen-koi-postgres psql -U postgres"
+OCTO_URL="${OCTO_URL:-http://127.0.0.1:8351}"
+GV_URL="${GV_URL:-http://37.27.48.12:8351}"
+GV_SSH="${GV_SSH:-root@37.27.48.12}"
+GV_PG_CONTAINER="${GV_PG_CONTAINER:-gv-koi-postgres}"
+GV_DB="${GV_DB:-gv_koi}"
+OCTO_PSQL="docker exec regen-koi-postgres psql -U postgres"
 
 echo "=========================================="
 echo "Federation Test: GV -> Octo"
+echo "  GV_URL:  ${GV_URL}"
+echo "  OCTO_URL: ${OCTO_URL}"
 echo "=========================================="
 
 # Check both agents are healthy
@@ -82,10 +87,10 @@ if [ -z "$ENTITY_URI" ]; then
     exit 1
 fi
 
-# Check GV's event queue
+# Check GV's event queue (via SSH to poly)
 echo ""
 echo "[4] Checking GV event queue..."
-GV_EVENTS=$($PSQL -d gv_koi -t -c "SELECT COUNT(*) FROM koi_net_events WHERE rid LIKE '%federation-test%' OR rid LIKE '%${TIMESTAMP}%'" 2>/dev/null | tr -d ' ')
+GV_EVENTS=$(ssh "${GV_SSH}" "docker exec ${GV_PG_CONTAINER} psql -U postgres -d ${GV_DB} -t -c \"SELECT COUNT(*) FROM koi_net_events WHERE rid LIKE '%federation-test%' OR rid LIKE '%${TIMESTAMP}%'\"" 2>/dev/null | tr -d ' ')
 echo "  Events in GV queue: ${GV_EVENTS:-0}"
 
 # Wait for Octo's poller to pick up the event
@@ -93,7 +98,7 @@ echo ""
 echo "[5] Waiting for Octo poller (max 90s)..."
 for i in $(seq 1 9); do
     sleep 10
-    CROSS_REFS=$($PSQL -d octo_koi -t -c "SELECT COUNT(*) FROM koi_net_cross_refs WHERE remote_node LIKE '%greater-victoria%'" 2>/dev/null | tr -d ' ')
+    CROSS_REFS=$($OCTO_PSQL -d octo_koi -t -c "SELECT COUNT(*) FROM koi_net_cross_refs WHERE remote_node LIKE '%greater-victoria%'" 2>/dev/null | tr -d ' ')
     echo "  ${i}0s: Cross-refs from GV in Octo: ${CROSS_REFS:-0}"
     if [ "${CROSS_REFS:-0}" -gt 0 ]; then
         break
@@ -103,7 +108,7 @@ done
 # Verify cross-reference
 echo ""
 echo "[6] Verifying cross-reference..."
-$PSQL -d octo_koi -c "SELECT local_uri, remote_rid, remote_node, relationship, confidence FROM koi_net_cross_refs ORDER BY created_at DESC LIMIT 5" 2>/dev/null
+$OCTO_PSQL -d octo_koi -c "SELECT local_uri, remote_rid, remote_node, relationship, confidence FROM koi_net_cross_refs ORDER BY created_at DESC LIMIT 5" 2>/dev/null
 
 echo ""
 echo "=========================================="
@@ -113,7 +118,6 @@ if [ "${CROSS_REFS:-0}" -gt 0 ]; then
 else
     echo "RESULT: Cross-reference not yet created."
     echo "  This may be expected if the poller hasn't run yet."
-    echo "  Check: manage-agents.sh status"
     echo "  Check: journalctl -u koi-api -f (look for poller logs)"
 fi
 echo "=========================================="

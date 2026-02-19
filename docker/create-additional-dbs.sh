@@ -2,7 +2,7 @@
 # Create additional databases for multi-agent KOI deployment
 # Usage: ./create-additional-dbs.sh [db_name ...]
 # Examples:
-#   ./create-additional-dbs.sh gv_koi cascadia_koi    # Phase 2
+#   ./create-additional-dbs.sh cascadia_koi             # Phase 5
 #   ./create-additional-dbs.sh cv_koi                  # Phase 4.5
 #   ./create-additional-dbs.sh                         # No args = default set
 
@@ -43,7 +43,7 @@ EOF
 }
 
 # Accept DB names as arguments, or default set
-DBS="${@:-gv_koi cascadia_koi}"
+DBS="${@:-cascadia_koi}"
 for DB in $DBS; do
   create_koi_db "$DB"
 done

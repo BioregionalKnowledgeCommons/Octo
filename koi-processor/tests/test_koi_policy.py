@@ -20,8 +20,13 @@ from api.koi_net_router import (
 from api.node_identity import (
     derive_node_rid,
     derive_node_rid_hash,
+    load_private_key,
     node_rid_matches_public_key,
+    save_private_key,
 )
+
+
+from pathlib import Path
 
 
 def _keypair():
@@ -386,4 +391,83 @@ def test_node_profile_ontology_optional():
     old_profile = NodeProfile(**old_peer_data)
     assert old_profile.ontology_uri is None
     assert old_profile.ontology_version is None
+
+
+# =============================================================================
+# P9: Private key encryption
+# =============================================================================
+
+
+def test_save_and_load_encrypted_key(tmp_path):
+    """Round-trip: generate → save encrypted → load → verify signs correctly."""
+    private_key, _ = _keypair()
+    key_file = tmp_path / "test_key.pem"
+    password = "test-password-123"
+
+    save_private_key(private_key, key_file, password=password)
+    loaded = load_private_key(key_file, password=password)
+
+    assert loaded is not None
+    # Verify the loaded key can sign and the signature is valid
+    payload = {"type": "test", "data": "hello"}
+    envelope = sign_envelope(payload, "source", "target", loaded)
+    pub = loaded.public_key()
+    verify_envelope(envelope, pub)
+
+
+def test_load_unencrypted_key_still_works(tmp_path):
+    """Backward compat: existing keys without password load fine."""
+    private_key, _ = _keypair()
+    key_file = tmp_path / "unencrypted_key.pem"
+
+    # Save without password (existing behavior)
+    save_private_key(private_key, key_file, password=None)
+    loaded = load_private_key(key_file, password=None)
+
+    assert loaded is not None
+    # Verify same public key
+    orig_der = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.DER,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    loaded_der = loaded.public_key().public_bytes(
+        encoding=serialization.Encoding.DER,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    assert orig_der == loaded_der
+
+
+def test_encrypted_key_derives_same_rid(tmp_path):
+    """Encrypt existing key → same public key → same node RID."""
+    private_key, public_key = _keypair()
+    rid_before = derive_node_rid("test-node", public_key)
+
+    key_file = tmp_path / "encrypted_key.pem"
+    save_private_key(private_key, key_file, password="secret")
+    loaded = load_private_key(key_file, password="secret")
+
+    rid_after = derive_node_rid("test-node", loaded.public_key())
+    assert rid_before == rid_after
+
+
+def test_encrypted_key_wrong_password_fails(tmp_path):
+    """Wrong password raises clear error (not silent corruption)."""
+    private_key, _ = _keypair()
+    key_file = tmp_path / "encrypted_key.pem"
+
+    save_private_key(private_key, key_file, password="correct-password")
+
+    with pytest.raises(Exception):
+        load_private_key(key_file, password="wrong-password")
+
+
+def test_encrypted_key_no_password_fails(tmp_path):
+    """Encrypted key loaded without password raises clear error."""
+    private_key, _ = _keypair()
+    key_file = tmp_path / "encrypted_key.pem"
+
+    save_private_key(private_key, key_file, password="my-secret")
+
+    with pytest.raises(Exception):
+        load_private_key(key_file, password=None)
 
