@@ -257,5 +257,9 @@ Expand to full 15 once these 3 are confirmed working.
 
 ## Changelog
 
+- **v1.1.1** (2026-02-18): Verification & closeout
+  - Contract tests: 76/76 passed (schema, security, vault smoke, response shape, error shape, API smoke)
+  - Manual verification: 8/8 checks passed (build, env vars, output format, path traversal, endpoints, defaults)
+  - Commits: `05ee778` (Octo plugin fixes, tagged `koi-gv-remote-stable`), `bf7c0d3` (14 BKC entity types in personal-koi-mcp), `206524b` (tsx dev dep fix)
 - **v1.1** (2026-02-18): Parity fixes — lazy VAULT_PATH, contract-aligned entity/vault tools in MCP, submitted_via default → "api", NanoClaw integration guide
 - **v1.0** (2026-02-18): Initial contract extracted from OpenClaw plugin `index.ts`
