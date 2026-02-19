@@ -306,7 +306,7 @@ BlockScience defines `ErrorType` enum (snake_case values):
 | UPDATE differential logic | Low | P6 | **COMPLETE** | UPDATE-aware cross-ref upsert with re-resolution |
 | NodeProfile ontology fields | Low | P5 | **COMPLETE** | `ontology_uri`, `ontology_version` in NodeProfile + migration 046 |
 | Protocol surface docs | Low | P4 | **COMPLETE** | Core vs extension documented in health endpoint and master doc |
-| Private key encryption | Low | Future | — | No password on PEM files; BlockScience requires `PRIV_KEY_PASSWORD` |
+| Private key encryption | Low | P9 | — | No password on PEM files; BlockScience requires `PRIV_KEY_PASSWORD` |
 
 ---
 
@@ -644,6 +644,9 @@ BlockScience defines `ErrorType` enum (snake_case values):
 | 2026-02-18 | P7: Resolution primitives module (exact, alias, fuzzy matching) |
 | 2026-02-18 | P8: WEBHOOK edge push delivery with key-refresh fallback, event dedup migration 047 |
 | 2026-02-18 | GV migrated from Octo-local (127.0.0.1:8352) to remote on poly (37.27.48.12:8351). 3-node topology verified. iptables firewall added on poly. |
+| 2026-02-18 | KOI Tool Contract v1.1.1 verified (76/76 contract tests, 8/8 manual checks, personal-koi-mcp pushed) |
+| 2026-02-18 | personal-koi-mcp extended to support all 14 BKC entity types in extraction/schema |
+| 2026-02-18 | Stabilization commit `05ee778` tagged `koi-gv-remote-stable` (Octo plugin fixes + GV remote migration) |
 
 ### B. Architecture Comparison
 

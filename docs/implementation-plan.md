@@ -29,9 +29,9 @@ All agents run on the existing VPS (`<SERVER_IP>`, 4 vCPU / 8GB RAM / 247GB disk
 
 | Agent | Database | KOI API Port | Vault Path | Status |
 |-------|----------|-------------|------------|--------|
-| **Octo** (Salish Sea) | `octo_koi` | 8351 | `~/.openclaw/workspace/vault/` | Existing |
-| **Greater Victoria** | `gv_koi` | 8352 | `/root/gv-agent/vault/` | Phase 2 |
-| **Cowichan Valley** | `cv_koi` | 8354 | `/root/cv-agent/vault/` | Phase 4.5 |
+| **Octo** (Salish Sea) | `octo_koi` | 8351 | `~/.openclaw/workspace/vault/` | Live (coordinator) |
+| **Greater Victoria** | `gv_koi` | 37.27.48.12:8351 | `/home/koi/gv-agent/vault/` | Live (remote) |
+| **Cowichan Valley** | `cv_koi` (Shawn) | 202.61.242.194:8351 | — | Live (federated) |
 | **Cascadia** | `cascadia_koi` | 8353 | `/root/cascadia-agent/vault/` | Phase 5 |
 | **Front Range** | `fr_koi` | 8355 | `/root/fr-agent/vault/` | Phase 5.5 |
 
@@ -275,9 +275,11 @@ Community-led monitoring of Pacific herring spawning...
 
 ---
 
-## Phase 2: Multi-Instance Infrastructure
+## Phase 2: Multi-Instance Infrastructure — COMPLETE
 
 **Goal:** Set up the database and configuration infrastructure for running multiple KOI agents on one VPS.
+
+> **Status:** All tasks complete. GV migrated to remote server (poly, 37.27.48.12) on 2026-02-18. Same keypair, RID preserved. 3-node topology: Octo + GV (remote) + CV (Shawn).
 
 ### 2.1 Additional Databases
 
@@ -331,11 +333,11 @@ done
 **Important:** The KOI API's `ensure_schema()` creates tables (`entity_registry`, `entity_relationships`, `allowed_predicates`, etc.) at startup. But the 27 BKC predicates in `038_bkc_predicates.sql` must be loaded separately — the script above handles this. Without it, new agents will have empty predicate tables and relationship creation will fail.
 
 **Tasks:**
-- [ ] Create `docker/create-additional-dbs.sh`
-- [ ] Run on server: `scp docker/create-additional-dbs.sh root@<SERVER_IP>:~/koi-stack/ && ssh root@<SERVER_IP> "bash ~/koi-stack/create-additional-dbs.sh"`
-- [ ] Verify databases exist: `docker exec regen-koi-postgres psql -U postgres -c "\l" | grep koi`
-- [ ] Verify extensions loaded: `docker exec regen-koi-postgres psql -U postgres -d gv_koi -c "\dx"`
-- [ ] Verify predicates populated: `docker exec regen-koi-postgres psql -U postgres -d gv_koi -c "SELECT count(*) FROM allowed_predicates;"`
+- [x] Create `docker/create-additional-dbs.sh`
+- [x] Run on server: `scp docker/create-additional-dbs.sh root@<SERVER_IP>:~/koi-stack/ && ssh root@<SERVER_IP> "bash ~/koi-stack/create-additional-dbs.sh"`
+- [x] Verify databases exist: `docker exec regen-koi-postgres psql -U postgres -c "\l" | grep koi`
+- [x] Verify extensions loaded: `docker exec regen-koi-postgres psql -U postgres -d gv_koi -c "\dx"`
+- [x] Verify predicates populated: `docker exec regen-koi-postgres psql -U postgres -d gv_koi -c "SELECT count(*) FROM allowed_predicates;"`
 
 ### 2.2 Greater Victoria Agent Configuration
 
@@ -388,13 +390,13 @@ WantedBy=multi-user.target
 ```
 
 **Tasks:**
-- [ ] Create directory structure on server
-- [ ] Write `gv.env` config file
-- [ ] Write GV workspace files (IDENTITY.md, SOUL.md — minimal)
-- [ ] Create and enable systemd service
-- [ ] Verify: `curl http://127.0.0.1:8352/health` returns healthy
-- [ ] Seed GV vault with 2-3 practice notes (e.g., Gorge Creek Herring, Goldstream Salmon, Beacon Hill Camas)
-- [ ] Register seed entities via API
+- [x] Create directory structure on server
+- [x] Write `gv.env` config file
+- [x] Write GV workspace files (IDENTITY.md, SOUL.md — minimal)
+- [x] Create and enable systemd service
+- [x] Verify: `curl http://127.0.0.1:8352/health` returns healthy
+- [x] Seed GV vault with 2-3 practice notes (e.g., Gorge Creek Herring, Goldstream Salmon, Beacon Hill Camas)
+- [x] Register seed entities via API
 
 **Test criteria:**
 - GV KOI API runs independently on port 8352
@@ -421,9 +423,9 @@ echo "$(date) | $(free -m | awk '/Mem:/{print "RAM: "$3"/"$2"MB"}') | $(docker e
 ```
 
 **Tasks:**
-- [ ] Update backup script to include `gv_koi` and `cascadia_koi`
-- [ ] Add resource monitoring cron job
-- [ ] Verify backups run successfully for new databases
+- [x] Update backup script to include `gv_koi` and `cascadia_koi`
+- [x] Add resource monitoring cron job
+- [x] Verify backups run successfully for new databases
 
 ### 2.4 Multi-Instance Management Script
 
@@ -475,9 +477,11 @@ esac
 
 ---
 
-## Phase 3: KOI-net Protocol Layer
+## Phase 3: KOI-net Protocol Layer — COMPLETE
 
 **Goal:** Add KOI-net protocol support to the KOI API, enabling inter-agent communication.
+
+> **Status:** All tasks complete. All 8 endpoints deployed. 93 pytest + 11 interop tests passing. See `koi-protocol-alignment-master.md` for full details.
 
 **Reference implementations:**
 - RegenAI coordinator: `~/projects/regenai/koi-sensors/koi_protocol/coordinator/koi_coordinator.py`
@@ -770,19 +774,19 @@ CREATE TABLE IF NOT EXISTS koi_net_nodes (
 
 ### Tasks
 
-- [ ] Add `rid-lib>=3.2.8` to `requirements.txt` and verify it installs in Python 3.12 venv
-- [ ] Create `koi-processor/api/koi_protocol.py` — Pydantic wire models with NodeProfile, rid_types filter, not_found/deferred
-- [ ] Create `koi-processor/api/event_queue.py` — database-backed event queue with confirmation tracking
-- [ ] Create `koi-processor/api/koi_envelope.py` — port from RegenAI's `shared/koi_envelope.py` (ECDSA P-256, raw r||s signatures)
-- [ ] Create `koi-processor/api/node_identity.py` — keypair generation, node RID, NodeProfile
-- [ ] Create `koi-processor/api/koi_net_router.py` — separate FastAPI router with feature flag
-- [ ] Implement all 8 endpoints (handshake, broadcast, poll, confirm, manifests, bundles, rids, health)
-- [ ] Create migration `039_koi_net_events.sql`
-- [ ] Run migration on all databases (octo_koi, gv_koi)
-- [ ] Add `cryptography>=42.0`, `httpx>=0.27`, `rid-lib>=3.2.8` to `requirements.txt`
-- [ ] Set `KOI_NET_ENABLED=true` in Octo's env, `KOI_NET_ENABLED=false` in GV's env initially
-- [ ] Generate node identities for Octo and GV agents
-- [ ] Run interop test (ported from RegenAI) against Octo's endpoints
+- [x] Add `rid-lib>=3.2.8` to `requirements.txt` and verify it installs in Python 3.12 venv
+- [x] Create `koi-processor/api/koi_protocol.py` — Pydantic wire models with NodeProfile, rid_types filter, not_found/deferred
+- [x] Create `koi-processor/api/event_queue.py` — database-backed event queue with confirmation tracking
+- [x] Create `koi-processor/api/koi_envelope.py` — port from RegenAI's `shared/koi_envelope.py` (ECDSA P-256, raw r||s signatures)
+- [x] Create `koi-processor/api/node_identity.py` — keypair generation, node RID, NodeProfile
+- [x] Create `koi-processor/api/koi_net_router.py` — separate FastAPI router with feature flag
+- [x] Implement all 8 endpoints (handshake, broadcast, poll, confirm, manifests, bundles, rids, health)
+- [x] Create migration `039_koi_net_events.sql`
+- [x] Run migration on all databases (octo_koi, gv_koi)
+- [x] Add `cryptography>=42.0`, `httpx>=0.27`, `rid-lib>=3.2.8` to `requirements.txt`
+- [x] Set `KOI_NET_ENABLED=true` in Octo's env, `KOI_NET_ENABLED=false` in GV's env initially
+- [x] Generate node identities for Octo and GV agents
+- [x] Run interop test (ported from RegenAI) against Octo's endpoints
 
 **Test criteria:**
 - Node identity generated and persisted across restarts
@@ -797,9 +801,11 @@ CREATE TABLE IF NOT EXISTS koi_net_nodes (
 
 ---
 
-## Phase 4: Federation (Greater Victoria ↔ Octo)
+## Phase 4: Federation (Greater Victoria ↔ Octo) — COMPLETE
 
 **Goal:** Prove two-node federation works — GV documents a practice, Octo receives it.
+
+> **Status:** All tasks complete. 3-node topology live. Cross-refs verified (Herring Monitoring = same_as, confidence 1.0).
 
 ### 4.0 RID Mapping for Existing Entities
 
@@ -944,19 +950,19 @@ CREATE INDEX IF NOT EXISTS idx_cross_refs_remote ON koi_net_cross_refs(remote_ri
 
 ### Tasks
 
-- [ ] Create migration `040_entity_koi_rids.sql` — add `koi_rid` column and unique index
-- [ ] Create `koi-processor/scripts/backfill_koi_rids.py` — one-time Python backfill using rid-lib's hash function
-- [ ] Run migration, then backfill script on `octo_koi`
-- [ ] Add `ON CONFLICT` handling to entity creation path in `/register-entity`
-- [ ] Insert manual edge configurations for GV ↔ Octo (via handshake or DB insert)
-- [ ] Enable `KOI_NET_ENABLED=true` on both Octo and GV
-- [ ] Modify `/register-entity` to emit KOI-net events (using `koi_rid` as the event RID)
-- [ ] Modify `/sync-relationships` to emit KOI-net events
-- [ ] Create `koi_poller.py` — background polling client
-- [ ] Integrate poller into FastAPI startup (asyncio background task)
-- [ ] Create migration `041_cross_references.sql`
-- [ ] Write end-to-end federation test script
-- [ ] Test: GV Practice → event → Octo receives → cross-reference created
+- [x] Create migration `040_entity_koi_rids.sql` — add `koi_rid` column and unique index
+- [x] Create `koi-processor/scripts/backfill_koi_rids.py` — one-time Python backfill using rid-lib's hash function
+- [x] Run migration, then backfill script on `octo_koi`
+- [x] Add `ON CONFLICT` handling to entity creation path in `/register-entity`
+- [x] Insert manual edge configurations for GV ↔ Octo (via handshake or DB insert)
+- [x] Enable `KOI_NET_ENABLED=true` on both Octo and GV
+- [x] Modify `/register-entity` to emit KOI-net events (using `koi_rid` as the event RID)
+- [x] Modify `/sync-relationships` to emit KOI-net events
+- [x] Create `koi_poller.py` — background polling client
+- [x] Integrate poller into FastAPI startup (asyncio background task)
+- [x] Create migration `041_cross_references.sql`
+- [x] Write end-to-end federation test script
+- [x] Test: GV Practice → event → Octo receives → cross-reference created
 
 **Test criteria:**
 - All existing entities have `koi_rid` values after migration + backfill script
@@ -970,7 +976,9 @@ CREATE INDEX IF NOT EXISTS idx_cross_refs_remote ON koi_net_cross_refs(remote_ri
 
 ---
 
-## Resource Checkpoint (Gate: Phase 4 → Phase 4.5)
+## Resource Checkpoint (Gate: Phase 4 → Phase 4.5) — PASSED
+
+> **Status:** Passed. GV migration to separate VPS (poly) reduced single-server pressure. CV runs on Shawn's separate server. Resource constraints on Octo's VPS are no longer the bottleneck.
 
 Before adding a third agent, review resource monitoring logs from Phase 2.3:
 
@@ -994,9 +1002,11 @@ This checkpoint is a gate, not a note. Do not proceed to Phase 4.5 without passi
 
 ---
 
-## Phase 4.5: Second Leaf Node (Cowichan Valley)
+## Phase 4.5: Second Leaf Node (Cowichan Valley) — COMPLETE
 
 **Goal:** Add a second leaf node under Octo to prove horizontal federation and genuine aggregation at the coordinator level.
+
+> **Status:** All tasks complete. Cowichan Valley (Shawn) live at 202.61.242.194:8351. 3-node federation proven.
 
 **Why needed:** With one leaf node (GV), Cascadia just sees Octo — not a network. Two leaves prove that Octo genuinely aggregates knowledge from multiple sub-bioregions before forwarding to Cascadia. This is the minimum viable test of the holon pattern.
 
@@ -1022,12 +1032,12 @@ Follow the same pattern as Phase 2 (GV agent):
 
 ### Tasks
 
-- [ ] Create agent directory and config (same pattern as Phase 2.2)
-- [ ] Create database: `./create-additional-dbs.sh cv_koi`
-- [ ] Seed vault with 2-3 unique practices
-- [ ] Configure edges to Octo
-- [ ] Test horizontal federation: both GV and CV events arrive at Octo
-- [ ] Verify entity cross-references work across three agents
+- [x] Create agent directory and config (same pattern as Phase 2.2)
+- [x] Create database: `./create-additional-dbs.sh cv_koi`
+- [x] Seed vault with 2-3 unique practices
+- [x] Configure edges to Octo
+- [x] Test horizontal federation: both GV and CV events arrive at Octo
+- [x] Verify entity cross-references work across three agents
 
 **Test criteria:**
 - Octo receives events from both GV and CV independently
@@ -1172,9 +1182,11 @@ This is the initial version — full pattern mining is Phase 6.
 
 ---
 
-## Phase 5.6: Error Handling & Failure Modes
+## Phase 5.6: Error Handling & Failure Modes — MOSTLY COMPLETE
 
 **Goal:** Before opening the network to external nodes, design and implement error handling for cross-node failure scenarios.
+
+> **Status:** Exponential backoff, key-refresh fallback, and self-healing handshake all implemented in P0-P8. Remaining: per-event batch error handling (partial).
 
 > **Why a separate phase:** Phases 2-5 test on localhost where network failures don't happen. Before any real federation (second VPS, external bioregional agents), we need to handle the failure modes that only appear over real networks.
 
@@ -1192,13 +1204,13 @@ This is the initial version — full pattern mining is Phase 6.
 
 ### Tasks
 
-- [ ] Implement exponential backoff in `koi_poller.py`
-- [ ] Add signature verification failure logging and alerting threshold
-- [ ] Add "pending RID" tracking with retry limit
-- [ ] Add 503 response on pool exhaustion for KOI-net endpoints
-- [ ] Add per-event error handling in batch processing (don't fail entire batch on one bad event)
-- [ ] Write integration test: simulate peer down → backoff → recovery
-- [ ] Document failure modes in operational runbook
+- [x] Implement exponential backoff in `koi_poller.py` — `min(30 * 2^(failures-1), 600)` seconds
+- [x] Add signature verification failure logging and alerting threshold
+- [x] Add "pending RID" tracking with retry limit
+- [x] Add 503 response on pool exhaustion for KOI-net endpoints
+- [ ] Add per-event error handling in batch processing (don't fail entire batch on one bad event) — partial
+- [x] Write integration test: simulate peer down → backoff → recovery
+- [x] Document failure modes in operational runbook — covered in `koi-protocol-alignment-master.md` and `CLAUDE.md`
 
 ---
 
@@ -1432,11 +1444,11 @@ Resolved based on review feedback, with reasoning:
 
 ## Remaining Open Questions
 
-1. **rid-lib compatibility:** Does rid-lib v3.2.8 install cleanly in the Python 3.12 venv on the VPS? Validate before committing to Phase 3.
+1. ~~**rid-lib compatibility:** Does rid-lib v3.2.8 install cleanly in the Python 3.12 venv on the VPS?~~ **Resolved** — rid-lib 3.2.14 installed. JCS hashing active and verified against BlockScience reference vectors.
 
 2. **BKC CoIP data access:** How do we get access to the BKC CoIP Obsidian vault? Through Andrea Farias, Vincent Arena (OMNI-Mapping), or the r3.0 team? This blocks Phase 0.5.
 
-3. **localhost vs real federation:** All Phase 2-5 testing happens on localhost. The first real federation test (TLS, network latency, firewalls) happens when deploying to a second server. At what point does this become necessary to validate? Probably before inviting external bioregional agents to connect.
+3. ~~**localhost vs real federation:** All Phase 2-5 testing happens on localhost. The first real federation test happens when deploying to a second server.~~ **Resolved** — GV on poly (37.27.48.12) + CV on Shawn's server (202.61.242.194) = real cross-network federation proven with iptables firewalling.
 
 4. **Ontology extension governance:** Who reviews proposed ontology extensions? The BKC CoIP has a "Philosophy, Epistemology & Indigenous Knowledge" working group — are they the right body? How formal does the review process need to be for early stages vs. when external communities are contributing? See [ontological architecture](./ontological-architecture.md) Section 10.
 
