@@ -43,9 +43,9 @@ logger = logging.getLogger(__name__)
 # Default scan interval: 6 hours
 DEFAULT_SCAN_INTERVAL = int(os.getenv("GITHUB_SCAN_INTERVAL", "21600"))
 CLONE_DIR = os.getenv("GITHUB_CLONE_DIR", "/tmp/github_sensor")
-VAULT_PATH = os.getenv("VAULT_PATH")
+VAULT_PATH = os.getenv("VAULT_PATH") or os.getenv("OBSIDIAN_VAULT_PATH")
 if not VAULT_PATH:
-    raise ValueError("VAULT_PATH environment variable must be set")
+    raise ValueError("VAULT_PATH (or OBSIDIAN_VAULT_PATH) environment variable must be set")
 
 # File extensions to process
 CODE_EXTENSIONS = {".py", ".ts", ".tsx", ".js", ".jsx"}

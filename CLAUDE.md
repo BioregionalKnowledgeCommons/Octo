@@ -59,7 +59,8 @@ GV's key: `/home/koi/koi-state/greater-victoria_private_key.pem` (on poly 37.27.
 │   │   ├── koi_poller.py            # Background federation poller
 │   │   ├── koi_protocol.py          # Wire format models (Pydantic)
 │   │   ├── event_queue.py           # DB-backed event queue
-│   │   └── node_identity.py         # Keypair + node RID generation
+│   │   ├── node_identity.py         # Keypair + node RID generation
+│   │   └── github_sensor.py        # GitHub repo scanner (tree-sitter, vault notes)
 │   ├── config/
 │   │   └── personal.env             # Octo DB creds, OpenAI key, vault path
 │   ├── migrations/
@@ -133,6 +134,7 @@ GV's key: `/home/koi/koi-state/greater-victoria_private_key.pem` (on poly 37.27.
 │   └── rebuild.sh                # Build + inject chat widget
 ├── octo-chat/                  # Chat API server
 │   └── server.js                 # Node.js proxy → openclaw agent
+├── github_sensor_clones/       # Git clones for GitHub sensor (persistent)
 └── backups/                    # Daily DB + vault backups (7-day retention)
 ```
 
