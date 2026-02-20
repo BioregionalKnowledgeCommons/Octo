@@ -4,7 +4,7 @@
 > **Status:** Living document — update as phases complete.
 > **Created:** 2026-02-18 | **Author:** Darren Zal, with research from BlockScience source analysis
 > **See also:** [`koi-alignment.md`](./koi-alignment.md) — original gap analysis and phase plan
-> **Last session:** `53f588e3-a8ee-49b1-bd56-047b2c9bd7cb` (2026-02-19, GV decommission + next steps)
+> **Last session:** 2026-02-19 (commit 9ea1e11, session 36a1507d)
 
 ---
 
@@ -691,6 +691,7 @@ BlockScience defines `ErrorType` enum (snake_case values):
 | 2026-02-19 | P9 key encryption deployed to production — GV (poly) and Octo keys encrypted at rest |
 | 2026-02-19 | Front Range agent deployed on Octo server (port 8355, localhost-only). `fr_koi` DB, bidirectional federation with Octo, 4 seed entities |
 | 2026-02-19 | `test-federation.sh` parameterized for multi-source testing (SOURCE_URL, SOURCE_SSH, SOURCE_DB, dynamic node RID filtering) |
+| 2026-02-19 | Commit `9ea1e11`: P9 key encryption deployed to all 3 nodes (Octo, GV, FR). Front Range agent fully deployed (DB, edges, seeded, key encrypted, federation verified). `test-federation.sh` parameterized for multi-source. All docs updated. |
 
 ### B. Tool Integration Architecture
 
@@ -783,16 +784,34 @@ curl -s http://127.0.0.1:8351/koi-net/health | python3 -m json.tool
 # Run full federation test
 bash ~/scripts/test-federation.sh
 
-# Deploy updated code (Octo + GV)
+# Deploy updated code (Octo + FR + GV)
 rsync -avz --delete koi-processor/api/ root@45.132.245.30:/root/koi-processor/api/
 rsync -avz --delete koi-processor/api/ root@37.27.48.12:/home/koi/koi-processor/api/
 ssh root@37.27.48.12 "chown -R koi:koi /home/koi/koi-processor"
 ssh root@45.132.245.30 "systemctl restart koi-api"
+ssh root@45.132.245.30 "systemctl restart fr-koi-api"
 ssh root@37.27.48.12 "systemctl restart gv-koi-api"
 
 # Stamp version on both servers after deploy
 git -C koi-processor rev-parse --short HEAD | ssh root@45.132.245.30 "cat > /root/koi-processor/.version"
 git -C koi-processor rev-parse --short HEAD | ssh root@37.27.48.12 "cat > /home/koi/koi-processor/.version"
+
+# Check FR federation health
+ssh root@45.132.245.30 "curl -s http://127.0.0.1:8355/koi-net/health | python3 -m json.tool"
+
+# Run federation test against FR
+ssh root@45.132.245.30 "SOURCE_URL=http://127.0.0.1:8355 SOURCE_DB=fr_koi bash ~/scripts/test-federation.sh"
+
+# --- Cowichan Valley (CV) ---
+# SSH to CV node
+ssh root@202.61.242.194
+
+# CV KOI health check
+ssh root@202.61.242.194 "curl -s http://127.0.0.1:8351/koi-net/health | python3 -m json.tool"
+
+# Deploy code to CV
+rsync -avz --delete koi-processor/api/ root@202.61.242.194:/home/koi/koi-processor/api/
+ssh root@202.61.242.194 "systemctl restart cv-koi-api"
 ```
 
 ### G. PyPI Package Adoption Status
@@ -816,42 +835,23 @@ The system is considered aligned for production federation when all are true:
 
 ---
 
-## 9. Next Steps (as of 2026-02-19)
+## 9. Next Steps (as of 2026-02-19, commit 9ea1e11)
 
-### Completed This Session
+### Completed Through This Commit
 
-- **Old GV decommissioned from Octo server (`45.132.245.30`):**
-  - Final backups created: `/root/backups/gv_koi_final_20260219.sql.gz` (106K) + `gv_agent_final_20260219.tar.gz`
-  - Removed: `gv-koi-api.service`, `gv_koi` database, `/root/gv-agent/` directory, old private key
-  - GV on poly (`37.27.48.12`) confirmed healthy: 11h uptime, 0 errors, Octo polling every minute
-  - Updated repo files: `gv.env`, `CLAUDE.md`, `README.md`, `koi-api.service.example` — zero `8352` references remain in active files
-- **Automated GV backups on poly (`37.27.48.12`):**
-  - `gv-backup.timer`: Daily at 3am CET → `pg_dump -Fc` + vault tar + sha256 checksums, 7-day retention
-  - `gv-backup-offhost.timer`: Weekly Sun 4am → rsync `.dump` + `.tar.gz` to `root@45.132.245.30:/root/backups/poly-mirror/`
-  - Verified: backup runs in <1s, checksum validated, restore tested (5 entities confirmed), off-host copy confirmed
-- **P9 private key encryption (code):**
-  - `node_identity.py`: `get_key_password()`, `save_private_key(password=)`, `load_private_key(password=)`, `load_or_create_identity(password=)`
-  - `scripts/encrypt_private_key.py`: Migration script with `.unencrypted.bak` rollback and public key verification
-  - 5 new tests in `test_koi_policy.py` (round-trip, backward compat, RID preservation, wrong password, no password)
+- [x] **P0–P9 all complete** — 98 pytest tests + 11 interop checks passing
+- [x] **P9 key encryption deployed to all 3 nodes** (Octo, GV, FR) — `.unencrypted.bak` files exist for rollback
+- [x] **Front Range agent fully deployed** — `fr_koi` DB, `fr-koi-api.service` on port 8355, workspace (IDENTITY.md, SOUL.md), 4 seed entities, bidirectional federation with Octo verified, key encrypted at rest
+- [x] **`test-federation.sh` parameterized** for multi-source testing (SOURCE_URL, SOURCE_SSH, SOURCE_DB, dynamic node RID filtering)
+- [x] **All docs updated** — CLAUDE.md, README.md, agents.conf reflect FR deployment and P9 completion
+- [x] **Old GV decommissioned** from Octo server — service, DB, cron removed; final backups retained
+- [x] **Automated GV backups** on poly — daily + weekly off-host to Octo
+- [x] **Cowichan Valley SSH access** obtained — `ssh root@202.61.242.194` (Shawn's node)
 
-### Ready to Pick Up
+### Active Next Steps (priority order)
 
-1. **Front Range agent setup** — Highest priority remaining item. Needs:
-   - Agent directory + config (`fr-agent/config/fr.env`)
-   - Database (`fr_koi`) — decide host: Octo server or separate
-   - Workspace files (IDENTITY.md, SOUL.md for Front Range bioregion)
-   - systemd service
-   - KOI-net edges (connect to Octo as coordinator — Cascadia doesn't exist yet)
-   - Seed entities for Front Range bioregion
-
+1. **GV env cleanup** — Make `gv.env` complete (add missing KOI-net federation vars; works because server env has them, but repo file is incomplete)
 2. **Phase 5.7: GitHub sensor** — Adapt for self-knowledge (Octo watches its own repos)
-
 3. **Phase 0.5: BKC CoIP vault audit** — Blocked on access from Andrea Farias / Vincent Arena
-
-4. **Phase 5: Cascadia coordinator** — After CV is running, proves holon pattern
-
-5. **Private key encryption deployment** — P9 code written but keys are not yet encrypted on production. Deploy code to all nodes first, then encrypt keys one at a time per the P9 deployment steps above.
-
-### Open Questions
-
-- Front Range: connect to Octo directly for now (since Cascadia coordinator doesn't exist yet) or wait?
+4. **Phase 5: Cascadia coordinator** — After CV is fully operational, proves holon pattern
+5. **commoning-koi-mcp split** — When a second node operator needs MCP access (see §8C)
