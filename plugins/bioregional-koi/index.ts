@@ -321,6 +321,7 @@ const bioregionalKoiPlugin = {
           const data = await koiRequest("/web/process", "POST", {
             url,
             hint_entities,
+            auto_ingest: false,
           });
           return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
         },
@@ -347,6 +348,7 @@ const bioregionalKoiPlugin = {
                   name: { type: "string" },
                   type: { type: "string", description: "Person, Organization, Project, Concept, Location, Bioregion, Practice, etc." },
                   context: { type: "string", description: "Brief context for how this entity relates" },
+                  confidence: { type: "number", description: "Optional confidence score 0-1 (null treated as 0.0 by quality gates)" },
                 },
                 required: ["name", "type"],
               },
