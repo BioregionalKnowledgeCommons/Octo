@@ -205,6 +205,21 @@ Migrations are **manifest-driven** — only migrations listed in `migrations/bas
 3. Run `./deploy.sh --target fr` (lowest risk first)
 4. Verify health, then `--target gv`, then `--target octo`
 
+### Branch lineage — critical context
+
+`gaiaaiagent/koi-processor` has **two separate production lineages:**
+
+| Branch | Deployed to | Who uses it |
+|--------|-------------|-------------|
+| `regen-prod` | `darren@202.61.196.119` (`/opt/projects/koi-processor`) | Regen Network (live, 73k docs, 9 sensors) |
+| `b1-chat-retrieval-hardening` (and BKC-specific branches) | BKC nodes via vendor pin | BKC federation (Octo, FR, GV, CV) |
+
+**Rules:**
+- **Never merge BKC branches into `regen-prod`** without a dedicated release review — the diff is 180+ files and will affect live Regen Network services.
+- **Never bump the vendor pin to a `regen-prod`-only commit** — those commits may lack BKC-specific APIs (`personal_ingest_api.py`, `koi_net_router.py`, commons intake, etc.).
+- The vendor pin should always point to a commit on a BKC-compatible branch (currently `b1-chat-retrieval-hardening`).
+- Changes destined for both systems need to be cherry-picked or merged deliberately in both directions.
+
 ## Common Operations
 
 ### SSH to server
