@@ -12,6 +12,8 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from api.llm_enricher import LLM_BACKEND
+
 logger = logging.getLogger(__name__)
 
 
@@ -65,6 +67,8 @@ class WebProcessResponse(BaseModel):
     entities: List[Dict[str, Any]] = []
     relationships: List[Dict[str, Any]] = []
     quality_stats: Optional[Dict[str, Any]] = None
+    ingestion_stats: Optional[Dict[str, Any]] = None
+    model_used: Optional[str] = None
     error: Optional[str] = None
 
 
@@ -315,6 +319,7 @@ def create_router(pool, caps):
         eval_resp = None
         entities_raw = []
         relationships_raw = []
+        model_used = None
 
         if caps.llm_enrichment and preview.content_text:
             existing_entities = []
@@ -327,6 +332,7 @@ def create_router(pool, caps):
             extraction = await extract_from_content(
                 preview.content_text, preview.title or "", body.url, existing_entities
             )
+            model_used = extraction.model_used
 
             entities_raw = [
                 {"name": e.name, "type": e.type, "confidence": e.confidence, "context": getattr(e, "context", "")}
@@ -370,7 +376,7 @@ def create_router(pool, caps):
                         transformation_type="llm_extraction",
                         input_rid=preview.rid or body.url,
                         output_rid=f"{preview.rid or body.url}:extraction",
-                        processor_name=extraction.model_used or "gemini",
+                        processor_name=extraction.model_used or LLM_BACKEND,
                         source_sensor="api",
                         parent_receipt_id=parent["receipt_id"] if parent else None,
                         metadata={
@@ -397,10 +403,11 @@ def create_router(pool, caps):
                 }
 
         # Step 4: Auto-ingest if requested
+        entities_created = 0
+        entities_resolved = 0
         if body.auto_ingest and entities_raw:
             async with pool.acquire() as conn:
                 from api.personal_ingest_api import resolve_entity, store_new_entity, ExtractedEntity
-                entities_created = 0
                 for ent in entities_raw:
                     extracted = ExtractedEntity(
                         name=ent["name"],
@@ -408,6 +415,7 @@ def create_router(pool, caps):
                         confidence=ent.get("confidence") if ent.get("confidence") is not None else 0.9,
                     )
                     canonical, is_new = await resolve_entity(conn, extracted)
+                    entities_resolved += 1
                     if is_new:
                         await store_new_entity(conn, extracted, canonical, preview.rid or body.url, source="web_process")
                         entities_created += 1
@@ -428,6 +436,12 @@ def create_router(pool, caps):
             entities=entities_raw,
             relationships=relationships_raw,
             quality_stats=quality_stats,
+            ingestion_stats={
+                "new_entities": entities_created,
+                "resolved_entities": entities_resolved,
+                "new_relationships": 0,
+            } if body.auto_ingest else None,
+            model_used=model_used,
         )
 
     @router.post("/ingest", response_model=WebIngestResponse)

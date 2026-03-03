@@ -3958,7 +3958,7 @@ async def web_process(request: WebProcessRequest):
     if not is_enrichment_available():
         raise HTTPException(
             status_code=503,
-            detail="LLM enrichment not configured. Set LLM_ENRICHMENT_ENABLED=true and GEMINI_API_KEY."
+            detail="LLM enrichment not configured. Set LLM_ENRICHMENT_ENABLED=true and OPENAI_API_KEY (or GEMINI_API_KEY for Gemini backend)."
         )
 
     async with db_pool.acquire() as conn:
@@ -4593,7 +4593,7 @@ async def entity_enrich(request: EntityEnrichRequest):
     if not is_enrichment_available():
         raise HTTPException(
             status_code=503,
-            detail="LLM enrichment not configured. Set LLM_ENRICHMENT_ENABLED=true and GEMINI_API_KEY."
+            detail="LLM enrichment not configured. Set LLM_ENRICHMENT_ENABLED=true and OPENAI_API_KEY (or GEMINI_API_KEY for Gemini backend)."
         )
 
     async with db_pool.acquire() as conn:
@@ -4732,7 +4732,7 @@ async def entity_describe(request: EntityDescribeRequest):
     if not is_enrichment_available():
         raise HTTPException(
             status_code=503,
-            detail="LLM enrichment not configured. Set LLM_ENRICHMENT_ENABLED=true and GEMINI_API_KEY."
+            detail="LLM enrichment not configured. Set LLM_ENRICHMENT_ENABLED=true and OPENAI_API_KEY (or GEMINI_API_KEY for Gemini backend)."
         )
 
     async with db_pool.acquire() as conn:
