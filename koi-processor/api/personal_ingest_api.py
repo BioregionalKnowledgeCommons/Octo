@@ -1040,6 +1040,15 @@ async def startup():
             except Exception as e:
                 logger.error(f"Failed to initialize Web sensor: {e}")
 
+        # Mount commitment pooling endpoints (always on — no capability gate required)
+        try:
+            from api.routers.commitment_router import create_router as create_commitment_router, create_pool_router
+            app.include_router(create_commitment_router(db_pool))
+            app.include_router(create_pool_router(db_pool))
+            logger.info("Commitment pooling endpoints mounted at /commitments/ and /pools/")
+        except Exception as e:
+            logger.error(f"Failed to mount commitment router: {e}")
+
     except Exception as e:
         logger.error(f"Failed to connect to database: {e}")
         raise

@@ -52,8 +52,8 @@ GV's key: `/home/koi/koi-state/greater-victoria_private_key.pem` (on poly 37.27.
 ├── koi-processor/              # KOI backend (Python, shared by all agents)
 │   ├── api/
 │   │   ├── personal_ingest_api.py   # Main API (FastAPI/uvicorn)
-│   │   ├── entity_schema.py         # 15 entity types, resolution config
-│   │   ├── vault_parser.py          # YAML→predicate mapping (27 predicates)
+│   │   ├── entity_schema.py         # 18 entity types, resolution config
+│   │   ├── vault_parser.py          # YAML→predicate mapping (33 predicates)
 │   │   ├── web_fetcher.py           # URL fetch + Playwright + content extraction
 │   │   ├── koi_net_router.py        # KOI-net protocol + commons intake endpoints
 │   │   ├── commons_ingest_worker.py # Async background worker for commons intake
@@ -407,13 +407,14 @@ Automated via systemd timer (`gv-backup.timer`, daily at 3am CET):
 
 The formal ontology is at `ontology/bkc-ontology.jsonld`. It defines:
 
-**15 entity types:** Person, Organization, Project, Location, Concept, Meeting + Practice, Pattern, CaseStudy, Bioregion, Protocol, Playbook, Question, Claim, Evidence
+**18 entity types:** Person, Organization, Project, Location, Concept, Meeting + Practice, Pattern, CaseStudy, Bioregion, Protocol, Playbook, Question, Claim, Evidence + **Commitment, CommitmentPool, CommitmentAction** (v1.1.0)
 
-**27 predicates** across 4 categories:
+**33 predicates** across 5 categories:
 - **Base KOI** (10): affiliated_with, attended, collaborates_with, founded, has_founder, has_project, involves_organization, involves_person, knows, located_in
 - **Knowledge Commoning** (4): aggregates_into, suggests, documents, practiced_in
 - **Discourse Graph** (7): supports, opposes, informs, generates, implemented_by, synthesizes, about
 - **SKOS + Hyphal** (6): broader, narrower, related_to, forked_from, builds_on, inspired_by
+- **Commitment Pooling** (6): pledges_commitment, aggregates_commitments, proves_commitment, redeems_via, governs_pool, disputes
 
 **Parser aliases** (not stored as separate predicates):
 - `documentedBy` → `documents` (direction swap)

@@ -19,7 +19,7 @@
       "rdfs:comment": "Bioregional Knowledge Commoning ontology for Octo's knowledge graph",
       "owl:versionInfo": "1.0.0",
       "dcterms:created": { "@type": "xsd:date", "@value": "2026-02-08" },
-      "dcterms:modified": { "@type": "xsd:date", "@value": "2026-02-08" }
+      "dcterms:modified": { "@type": "xsd:date", "@value": "2026-03-03" }
     },
 
     { "@id": "bkc:Practice", "@type": "owl:Class",
@@ -127,6 +127,54 @@
 
     { "@id": "bkc:inspired_by", "@type": "owl:ObjectProperty",
       "rdfs:label": "inspired by",
-      "rdfs:comment": "Hyphal lineage: conceptual inspiration" }
+      "rdfs:comment": "Hyphal lineage: conceptual inspiration" },
+
+    { "@id": "bkc:Commitment", "@type": "owl:Class",
+      "rdfs:label": "Commitment",
+      "rdfs:comment": "A formal pledge by a Person or Organization to deliver goods, labor, or service. Analogous to a Community Asset Voucher (CAV) in the Sarafu/Grassroots Economics model. Has lifecycle states: PROPOSED → VERIFIED → ACTIVE → EVIDENCE_LINKED → REDEEMED (or REJECTED/WITHDRAWN/DISPUTED/RESOLVED)." },
+
+    { "@id": "bkc:CommitmentPool", "@type": "owl:Class",
+      "rdfs:label": "Commitment Pool",
+      "rdfs:comment": "An aggregation of commitments by a community or bioregion, enabling mutual pooling of capacity and obligations. Pools have threshold mechanics: once enough commitments are verified, the pool activates and commitments become routable economic signals." },
+
+    { "@id": "bkc:CommitmentAction", "@type": "owl:Class",
+      "rdfs:label": "Commitment Action",
+      "rdfs:comment": "A recorded act of fulfillment, partial or full, against a Commitment. Captures the Mweria cycle entry pattern — the act of delivering on a pledge within a commitment pool." },
+
+    { "@id": "bkc:pledges_commitment", "@type": "owl:ObjectProperty",
+      "rdfs:label": "pledges commitment",
+      "rdfs:domain": [{ "@id": "schema:Person" }, { "@id": "schema:Organization" }],
+      "rdfs:range": { "@id": "bkc:Commitment" },
+      "rdfs:comment": "Person or Organization makes a formal pledge encoded as a Commitment entity." },
+
+    { "@id": "bkc:aggregates_commitments", "@type": "owl:ObjectProperty",
+      "rdfs:label": "aggregates commitments",
+      "rdfs:domain": { "@id": "bkc:CommitmentPool" },
+      "rdfs:range": { "@id": "bkc:Commitment" },
+      "rdfs:comment": "CommitmentPool contains and aggregates individual pledges. Inverse alias: pooled_in (parser only, not stored)." },
+
+    { "@id": "bkc:proves_commitment", "@type": "owl:ObjectProperty",
+      "rdfs:label": "proves commitment",
+      "rdfs:domain": { "@id": "bkc:Evidence" },
+      "rdfs:range": { "@id": "bkc:Commitment" },
+      "rdfs:comment": "Evidence entity verifies fulfillment of a Commitment, transitioning it to EVIDENCE_LINKED state. Bridges the TBFF Evidence write-back loop with the commitment lifecycle." },
+
+    { "@id": "bkc:redeems_via", "@type": "owl:ObjectProperty",
+      "rdfs:label": "redeems via",
+      "rdfs:domain": { "@id": "bkc:Commitment" },
+      "rdfs:range": { "@id": "bkc:Evidence" },
+      "rdfs:comment": "Path from a pledge to its proof of fulfillment. A Commitment redeems_via an Evidence entity (or Hypercert once minted). Inverse of proves_commitment." },
+
+    { "@id": "bkc:governs_pool", "@type": "owl:ObjectProperty",
+      "rdfs:label": "governs pool",
+      "rdfs:domain": [{ "@id": "schema:Organization" }, { "@id": "bkc:Bioregion" }],
+      "rdfs:range": { "@id": "bkc:CommitmentPool" },
+      "rdfs:comment": "Organization or Bioregion entity responsible for stewarding a CommitmentPool. Maps to the Service Provider role in the Nondominium governance model." },
+
+    { "@id": "bkc:disputes", "@type": "owl:ObjectProperty",
+      "rdfs:label": "disputes",
+      "rdfs:domain": [{ "@id": "schema:Person" }, { "@id": "schema:Organization" }],
+      "rdfs:range": { "@id": "bkc:Commitment" },
+      "rdfs:comment": "Formal dispute entry against a Commitment. Transitions state to DISPUTED pending resolution. Implements the contestability requirement of Sangat-grade commitment infrastructure." }
   ]
 }
