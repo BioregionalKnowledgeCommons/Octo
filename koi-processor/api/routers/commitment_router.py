@@ -16,7 +16,6 @@ All state transitions are recorded in commitment_state_log (insert-only).
 
 import hashlib
 import logging
-import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -127,9 +126,9 @@ def _commitment_rid(pledger_uri: str, title: str) -> str:
     return f"orn:koi-net.commitment:{h}"
 
 
-def _pool_rid(name: str) -> str:
+def _pool_rid(name: str, steward_uri: str = "") -> str:
     """Deterministic RID for a commitment pool."""
-    h = hashlib.sha256(f"pool:{name}:{uuid.uuid4()}".encode()).hexdigest()[:32]
+    h = hashlib.sha256(f"pool:{name}:{steward_uri}".encode()).hexdigest()[:32]
     return f"orn:koi-net.commitment-pool:{h}"
 
 
@@ -188,6 +187,16 @@ def create_router(pool, caps=None):
                 VALUES ($1, NULL, 'PROPOSED', $2, 'created')
                 ON CONFLICT DO NOTHING
             """, rid, body.created_by)
+
+            # Write pledges_commitment relationship
+            try:
+                await conn.execute("""
+                    INSERT INTO entity_relationships (subject_uri, predicate, object_uri, source)
+                    VALUES ($1, 'pledges_commitment', $2, 'commitment_registry')
+                    ON CONFLICT DO NOTHING
+                """, body.pledger_uri, rid)
+            except Exception as e:
+                logger.warning(f"Failed to create pledges_commitment relationship: {e}")
 
         logger.info(f"commitment.create rid={rid} pledger={body.pledger_uri}")
         return _row_to_commitment(row)
@@ -344,7 +353,7 @@ def create_pool_router(pool, caps=None):
     @router.post("/create", response_model=PoolResponse, status_code=201)
     async def create_pool(body: PoolCreateRequest):
         """Create a new commitment pool."""
-        rid = _pool_rid(body.name)
+        rid = _pool_rid(body.name, body.steward_uri or "")
         async with pool.acquire() as conn:
             row = await conn.fetchrow("""
                 INSERT INTO commitment_pools
@@ -364,6 +373,17 @@ def create_pool_router(pool, caps=None):
                 INSERT INTO commitment_pool_events (pool_rid, event_type, actor)
                 VALUES ($1, 'created', $2)
             """, rid, body.created_by)
+
+            # Write governs_pool relationship
+            if body.steward_uri:
+                try:
+                    await conn.execute("""
+                        INSERT INTO entity_relationships (subject_uri, predicate, object_uri, source)
+                        VALUES ($1, 'governs_pool', $2, 'commitment_registry')
+                        ON CONFLICT DO NOTHING
+                    """, body.steward_uri, rid)
+                except Exception as e:
+                    logger.warning(f"Failed to create governs_pool relationship: {e}")
 
         logger.info(f"pool.create rid={rid} name={body.name}")
         return _row_to_pool(row)
@@ -407,6 +427,16 @@ def create_pool_router(pool, caps=None):
                 INSERT INTO commitment_pool_events (pool_rid, event_type, actor, payload)
                 VALUES ($1, 'pledge_added', $2, $3::jsonb)
             """, rid, body.actor, _json_dumps({"commitment_rid": body.commitment_rid}))
+
+            # Write aggregates_commitments relationship
+            try:
+                await conn.execute("""
+                    INSERT INTO entity_relationships (subject_uri, predicate, object_uri, source)
+                    VALUES ($1, 'aggregates_commitments', $2, 'commitment_registry')
+                    ON CONFLICT DO NOTHING
+                """, rid, body.commitment_rid)
+            except Exception as e:
+                logger.warning(f"Failed to create aggregates_commitments relationship: {e}")
 
             # Check if threshold is now met and auto-activate
             total = await conn.fetchval(

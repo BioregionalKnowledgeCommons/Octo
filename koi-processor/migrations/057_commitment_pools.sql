@@ -2,12 +2,8 @@
 -- CommitmentPool tables: aggregation of commitments with threshold mechanics
 -- and pool-level governance.
 --
--- NOTE: Run AFTER 056_commitment_registry.sql (commitments.pool_id FK requires
--- this table to exist first; the FK in 056 uses ON DELETE SET NULL so order
--- matters only at schema creation time).
---
--- If running for the first time, apply 057 first, then 056, OR run this as a
--- combined migration with the FK added after both tables exist.
+-- NOTE: Run AFTER 056_commitment_registry.sql. The FK from commitments.pool_id
+-- to commitment_pools.id is added at the end of this file (after both tables exist).
 
 CREATE TABLE IF NOT EXISTS commitment_pools (
     id              SERIAL PRIMARY KEY,
@@ -50,6 +46,11 @@ CREATE INDEX IF NOT EXISTS idx_pools_state       ON commitment_pools(state);
 CREATE INDEX IF NOT EXISTS idx_pools_bioregion   ON commitment_pools(bioregion_uri);
 CREATE INDEX IF NOT EXISTS idx_pool_events_rid   ON commitment_pool_events(pool_rid);
 CREATE INDEX IF NOT EXISTS idx_pool_events_type  ON commitment_pool_events(event_type);
+
+-- Add FK from commitments.pool_id → commitment_pools.id (both tables now exist)
+ALTER TABLE commitments
+    ADD CONSTRAINT fk_commitments_pool
+    FOREIGN KEY (pool_id) REFERENCES commitment_pools(id) ON DELETE SET NULL;
 
 -- Register migration
 INSERT INTO koi_migrations (migration_id, checksum)

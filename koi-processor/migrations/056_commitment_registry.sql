@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS commitments (
     id              SERIAL PRIMARY KEY,
     commitment_rid  TEXT UNIQUE NOT NULL,          -- KOI RID for federation
     pledger_uri     TEXT NOT NULL,                 -- entity_registry.fuseki_uri of pledger
-    pool_id         INTEGER REFERENCES commitment_pools(id) ON DELETE SET NULL,
+    pool_id         INTEGER,
     title           TEXT NOT NULL,                 -- Short description of the pledge
     description     TEXT,                          -- Full pledge description
     offer_type      TEXT NOT NULL DEFAULT 'labor', -- labor | goods | service | knowledge | stewardship

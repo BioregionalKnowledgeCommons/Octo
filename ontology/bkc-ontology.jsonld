@@ -17,7 +17,7 @@
       "@type": "owl:Ontology",
       "rdfs:label": "BKC Ontology",
       "rdfs:comment": "Bioregional Knowledge Commoning ontology for Octo's knowledge graph",
-      "owl:versionInfo": "1.0.0",
+      "owl:versionInfo": "1.1.0",
       "dcterms:created": { "@type": "xsd:date", "@value": "2026-02-08" },
       "dcterms:modified": { "@type": "xsd:date", "@value": "2026-03-03" }
     },

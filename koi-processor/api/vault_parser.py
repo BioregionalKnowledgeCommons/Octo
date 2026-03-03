@@ -149,6 +149,12 @@ PREDICATE_TO_FIELD: Dict[str, str] = {
     'forked_from': 'forkedFrom',
     'builds_on': 'buildsOn',
     'inspired_by': 'inspiredBy',
+    'pledges_commitment': 'commitments',
+    'aggregates_commitments': 'pooledCommitments',
+    'proves_commitment': 'provesCommitment',
+    'redeems_via': 'redeemsVia',
+    'governs_pool': 'governsPool',
+    'disputes': 'disputes',
 }
 
 
