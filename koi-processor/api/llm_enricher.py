@@ -3,7 +3,7 @@
 LLM Extraction Layer for Web Content Processing
 
 Extracts structured entities, relationships, descriptions, and schema-specific
-fields from full source content using Gemini via Google AI Studio API.
+fields from full source content using OpenAI (default) or Gemini.
 
 This module sits between /web/preview (content fetch) and /web/ingest (resolution + storage).
 The /ingest endpoint stays LLM-free — this module handles all LLM work.
@@ -22,10 +22,12 @@ from dataclasses import dataclass, field
 logger = logging.getLogger(__name__)
 
 # Config
-LLM_BACKEND = os.getenv("LLM_BACKEND", "gemini")
+LLM_BACKEND = os.getenv("LLM_BACKEND", "openai")
 LLM_ENRICHMENT_ENABLED = os.getenv("LLM_ENRICHMENT_ENABLED", "false").lower() == "true"
 LLM_GEMINI_MODEL = os.getenv("LLM_GEMINI_MODEL", "gemini-2.5-flash")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+LLM_OPENAI_MODEL = os.getenv("LLM_OPENAI_MODEL", "gpt-4o-mini")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 VERTEX_PROJECT_ID = os.getenv("VERTEX_PROJECT_ID", "")
 VERTEX_LOCATION = os.getenv("VERTEX_LOCATION", "us-central1")
 
@@ -159,6 +161,8 @@ Rules:
 4. Set confidence based on how explicitly the information appears in the source.
 5. For the summary, write 2-4 sentences describing what this page is about.
 6. For topics, extract 3-8 key themes as short phrases.
+7. For Claim entities: extract explicit assertions, arguments, or positions stated in the text. Example: {{"name": "Agents can allocate $500 independently", "type": "Claim", "description": "The system allows agents to autonomously allocate up to $500 without requiring human review.", "confidence": 0.95}}
+8. For Question entities: extract open questions, design questions, or unresolved issues mentioned. Example: {{"name": "How do we handle indigenous data sovereignty?", "type": "Question", "description": "An open design question about protocols for respecting indigenous communities' rights over their traditional knowledge.", "confidence": 0.9}}
 
 Return JSON with this exact structure:
 {{
@@ -193,6 +197,23 @@ SYSTEM_PROMPT = """You are a knowledge graph extraction agent for a bioregional 
 
 # Gemini client (lazy-initialized)
 _genai_client = None
+
+# OpenAI client (lazy-initialized)
+_openai_client = None
+
+
+def _get_openai_client():
+    """Lazy-initialize the OpenAI async client."""
+    global _openai_client
+    if _openai_client is None:
+        try:
+            from openai import AsyncOpenAI
+            _openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+            logger.info(f"Initialized OpenAI client (model: {LLM_OPENAI_MODEL})")
+        except Exception as e:
+            logger.error(f"Failed to initialize OpenAI client: {e}")
+            raise
+    return _openai_client
 
 
 def _get_genai_client():
@@ -246,6 +267,34 @@ async def _call_gemini(prompt: str) -> str:
     )
 
     return response.text
+
+
+async def _call_openai(prompt: str) -> str:
+    """Call OpenAI and return the response text (JSON format enforced)."""
+    client = _get_openai_client()
+
+    response = await client.chat.completions.create(
+        model=LLM_OPENAI_MODEL,
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ],
+        response_format={"type": "json_object"},
+        temperature=0.3,
+    )
+
+    return response.choices[0].message.content
+
+
+async def _call_llm(prompt: str) -> tuple[str, str]:
+    """Dispatch to the configured LLM backend. Returns (response_text, model_name)."""
+    backend = LLM_BACKEND.lower()
+    if backend == "openai":
+        return await _call_openai(prompt), LLM_OPENAI_MODEL
+    elif backend == "gemini":
+        return await _call_gemini(prompt), LLM_GEMINI_MODEL
+    else:
+        raise ValueError(f"Unknown LLM_BACKEND: {LLM_BACKEND!r}. Set to 'openai' or 'gemini'.")
 
 
 def _validate_entity_type(entity_type: str) -> str:
@@ -364,7 +413,7 @@ async def extract_from_content(
         return ExtractionResult()
 
     # Truncate very long content to stay within context limits
-    # Gemini 3 Flash has 1M context, but we cap at 200K chars (~50K tokens) for cost
+    # Cap at 200K chars (~50K tokens) for cost control across all backends
     max_chars = int(os.getenv("LLM_MAX_CONTENT_CHARS", "200000"))
     if len(source_content) > max_chars:
         logger.info(f"Truncating content from {len(source_content)} to {max_chars} chars")
@@ -375,9 +424,9 @@ async def extract_from_content(
     )
 
     try:
-        response_text = await _call_gemini(prompt)
+        response_text, model_name = await _call_llm(prompt)
         result = _parse_extraction_response(response_text)
-        result.model_used = LLM_GEMINI_MODEL
+        result.model_used = model_name
         return result
     except Exception as e:
         logger.error(f"LLM extraction failed: {e}")
@@ -425,7 +474,7 @@ Return JSON object mapping entity name to description string:
 """
 
     try:
-        response_text = await _call_gemini(prompt)
+        response_text, _ = await _call_llm(prompt)
         descriptions = json.loads(response_text)
         if isinstance(descriptions, dict):
             logger.info(f"Generated {len(descriptions)} descriptions in batch")
@@ -440,6 +489,9 @@ def is_enrichment_available() -> bool:
     """Check if LLM enrichment is configured and available."""
     if not LLM_ENRICHMENT_ENABLED:
         return False
-    if LLM_BACKEND == "gemini" and not GEMINI_API_KEY and not VERTEX_PROJECT_ID:
+    backend = LLM_BACKEND.lower()
+    if backend == "openai" and not OPENAI_API_KEY:
+        return False
+    if backend == "gemini" and not GEMINI_API_KEY and not VERTEX_PROJECT_ID:
         return False
     return True
