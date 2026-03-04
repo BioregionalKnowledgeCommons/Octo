@@ -17,7 +17,7 @@
       "@type": "owl:Ontology",
       "rdfs:label": "BKC Ontology",
       "rdfs:comment": "Bioregional Knowledge Commoning ontology for Octo's knowledge graph",
-      "owl:versionInfo": "1.1.0",
+      "owl:versionInfo": "1.2.0",
       "dcterms:created": { "@type": "xsd:date", "@value": "2026-02-08" },
       "dcterms:modified": { "@type": "xsd:date", "@value": "2026-03-03" }
     },
@@ -128,6 +128,68 @@
     { "@id": "bkc:inspired_by", "@type": "owl:ObjectProperty",
       "rdfs:label": "inspired by",
       "rdfs:comment": "Hyphal lineage: conceptual inspiration" },
+
+    { "@id": "bkc:Outcome", "@type": "owl:Class",
+      "rdfs:label": "Outcome",
+      "rdfs:comment": "A desired end-state or goal on the project roadmap. Outcomes are delivered by Initiatives and WorkItems." },
+
+    { "@id": "bkc:Initiative", "@type": "owl:Class",
+      "rdfs:label": "Initiative",
+      "rdfs:comment": "A scoped body of work on the roadmap, containing multiple WorkItems and delivering to Outcomes or Milestones." },
+
+    { "@id": "bkc:WorkItem", "@type": "owl:Class",
+      "rdfs:label": "Work Item",
+      "rdfs:comment": "A concrete, assignable unit of work on the roadmap. WorkItems deliver to Outcomes or Milestones via Initiatives." },
+
+    { "@id": "bkc:Milestone", "@type": "owl:Class",
+      "rdfs:label": "Milestone",
+      "rdfs:comment": "A time-bound checkpoint on the roadmap marking significant progress or a deliverable gate." },
+
+    { "@id": "bkc:Decision", "@type": "owl:Class",
+      "rdfs:label": "Decision",
+      "rdfs:comment": "A recorded governance or architectural decision on the roadmap, with rationale and status." },
+
+    { "@id": "bkc:Risk", "@type": "owl:Class",
+      "rdfs:label": "Risk",
+      "rdfs:comment": "An identified threat or uncertainty on the roadmap that may block progress. Mitigated by WorkItems, Initiatives, or Decisions." },
+
+    { "@id": "bkc:Metric", "@type": "owl:Class",
+      "rdfs:label": "Metric",
+      "rdfs:comment": "A measurable indicator tracking progress toward an Outcome on the roadmap." },
+
+    { "@id": "bkc:depends_on", "@type": "owl:ObjectProperty",
+      "rdfs:label": "depends on",
+      "rdfs:domain": [{ "@id": "bkc:Outcome" }, { "@id": "bkc:Initiative" }, { "@id": "bkc:WorkItem" }, { "@id": "bkc:Milestone" }],
+      "rdfs:range": [{ "@id": "bkc:Outcome" }, { "@id": "bkc:Initiative" }, { "@id": "bkc:WorkItem" }, { "@id": "bkc:Milestone" }],
+      "rdfs:comment": "Roadmap dependency: node depends on completion of another node." },
+
+    { "@id": "bkc:delivers", "@type": "owl:ObjectProperty",
+      "rdfs:label": "delivers",
+      "rdfs:domain": [{ "@id": "bkc:WorkItem" }, { "@id": "bkc:Initiative" }],
+      "rdfs:range": [{ "@id": "bkc:Outcome" }, { "@id": "bkc:Milestone" }],
+      "rdfs:comment": "Roadmap contribution: work item or initiative delivers to an outcome or milestone." },
+
+    { "@id": "bkc:measures", "@type": "owl:ObjectProperty",
+      "rdfs:label": "measures",
+      "rdfs:domain": { "@id": "bkc:Metric" },
+      "rdfs:range": { "@id": "bkc:Outcome" },
+      "rdfs:comment": "Metric measures progress toward an outcome." },
+
+    { "@id": "bkc:mitigates", "@type": "owl:ObjectProperty",
+      "rdfs:label": "mitigates",
+      "rdfs:domain": [{ "@id": "bkc:WorkItem" }, { "@id": "bkc:Initiative" }, { "@id": "bkc:Decision" }],
+      "rdfs:range": { "@id": "bkc:Risk" },
+      "rdfs:comment": "Work or decision mitigates an identified risk." },
+
+    { "@id": "bkc:blocks", "@type": "owl:ObjectProperty",
+      "rdfs:label": "blocks",
+      "rdfs:domain": [{ "@id": "bkc:Risk" }, { "@id": "bkc:WorkItem" }, { "@id": "bkc:Initiative" }, { "@id": "bkc:Decision" }],
+      "rdfs:range": [{ "@id": "bkc:WorkItem" }, { "@id": "bkc:Initiative" }, { "@id": "bkc:Milestone" }],
+      "rdfs:comment": "Node blocks progress on another node." },
+
+    { "@id": "bkc:references", "@type": "owl:ObjectProperty",
+      "rdfs:label": "references",
+      "rdfs:comment": "General reference link between roadmap entities." },
 
     { "@id": "bkc:Commitment", "@type": "owl:Class",
       "rdfs:label": "Commitment",
