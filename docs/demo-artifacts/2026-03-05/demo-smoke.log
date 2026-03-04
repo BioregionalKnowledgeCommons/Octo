@@ -1,0 +1,26 @@
+[1m=== BKC Demo Smoke Test (2026-03-04 09:10:30 UTC) ===[0m
+
+[1mCheck 1: A2A Agent Card[0m
+[0;32m  PASS: Agent card has 15 tools (>= 15)[0m
+[1mCheck 2: Entity Search — Octo (AG Neyer)[0m
+[0;32m  PASS: Found 1 result(s) for 'AG Neyer' on Octo[0m
+[1mCheck 3: Entity Search — Front Range (Clawsmos)[0m
+[0;32m  PASS: Found 1 result(s) for 'Clawsmos' on Front Range[0m
+[1mCheck 4: Chat Grounding (4-node fanout)[0m
+[0;32m  PASS: Chat: 4 nodes, answer=yes, rationale=yes, error_nodes=0[0m
+[1mCheck 5: 4-Node Health[0m
+  octo-salish-sea: healthy
+  greater-victoria: healthy
+  front-range: healthy
+  cowichan-valley: healthy
+[0;32m  PASS: All 4 required nodes healthy (4/4)[0m
+[1mCheck 6: Segment 4 — Summarizer Ingest Round-Trip[0m
+  Ingest: success=True, entities=2, relationships=1
+  Resolved org: SmokeOrg-1772433168 (orn:personal-koi.entity:organization-smokeorg-1772433168-e1615973db78)
+  Search: found SmokeOrg-1772433168 by URI (1 results)
+  Chat (informational): I don't have any information about "SmokeOrg-1772615430" in the provided context. It appears that this entity is not inc
+[0;32m  PASS: Ingest + search round-trip verified (doc_rid: smoke:segment4:1772615430)[0m
+
+[1m==================================[0m
+[0;32mPASS: 6/6[0m
+[1m==================================[0m

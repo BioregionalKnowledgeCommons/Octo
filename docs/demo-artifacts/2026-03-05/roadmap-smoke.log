@@ -1,0 +1,21 @@
+=== Roadmap Smoke Tests ===
+Base URL: https://45.132.245.30.sslip.io/commons
+
+--- 1. Stats endpoint ---
+  [PASS] total_nodes (got: 106 >= 100)
+  [PASS] total_edges (got: 148 >= 140)
+  [PASS] version non-empty (got: true)
+--- 2. Query endpoint ---
+  [PASS] done items (got: 41 >= 30)
+  [PASS] in_progress items (got: 9 >= 1)
+--- 3. Walk endpoint ---
+  [PASS] walk node_count (swarm backward) (got: 22 >= 10)
+--- 4. Chat roadmap intent ---
+  [PASS] intent (got: roadmap)
+  [PASS] respondingNode (got: roadmap)
+  [PASS] chat sources (got: 12 >= 5)
+--- 5. Chat KOI fallthrough ---
+  [PASS] KOI fallthrough (not roadmap) (got: true)
+
+=== Results: 10/10 passed ===
+ALL PASSED

@@ -70,6 +70,12 @@ deploy_node() {
         return 0
     fi
 
+    # Preflight: verify rsync is available on target
+    if ! ssh "$host" "command -v rsync" >/dev/null 2>&1; then
+        echo "ERROR: rsync not found on $host — install with: ssh $host 'apt-get install -y rsync'"
+        return 1
+    fi
+
     # Backup current version
     echo "Backing up current version..."
     ssh "$host" "cp -r $path ${path}.bak" 2>/dev/null || true
