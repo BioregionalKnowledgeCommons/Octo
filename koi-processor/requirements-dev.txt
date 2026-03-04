@@ -1,6 +1,0 @@
--r requirements.txt
-
-# Test tooling
-pytest>=8.0.0
-pytest-asyncio>=0.23.0
-pytest-mock>=3.12.0

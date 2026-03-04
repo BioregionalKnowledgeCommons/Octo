@@ -207,18 +207,17 @@ Migrations are **manifest-driven** — only migrations listed in `migrations/bas
 
 ### Branch lineage — critical context
 
-`gaiaaiagent/koi-processor` has **two separate production lineages:**
+`gaiaaiagent/koi-processor` has a **single unified branch:**
 
 | Branch | Deployed to | Who uses it |
 |--------|-------------|-------------|
-| `regen-prod` | `darren@202.61.196.119` (`/opt/projects/koi-processor`) | Regen Network (live, 73k docs, 9 sensors) |
-| `b1-chat-retrieval-hardening` (and BKC-specific branches) | BKC nodes via vendor pin | BKC federation (Octo, FR, GV, CV) |
+| `regen-prod` | BKC nodes via vendor pin + Regen Network | Both BKC federation (Octo, FR, GV, CV) and Regen Network |
+
+**History:** Prior to 2026-03-03, BKC work lived on `b1-chat-retrieval-hardening` (72 commits diverged from `regen-prod`). Merged in session `a9389700` with zero conflicts. Rollback tag: `pre-merge-regen-prod-20260303-232834` at `947bca3f`.
 
 **Rules:**
-- **Never merge BKC branches into `regen-prod`** without a dedicated release review — the diff is 180+ files and will affect live Regen Network services.
-- **Never bump the vendor pin to a `regen-prod`-only commit** — those commits may lack BKC-specific APIs (`personal_ingest_api.py`, `koi_net_router.py`, commons intake, etc.).
-- The vendor pin should always point to a commit on a BKC-compatible branch (currently `b1-chat-retrieval-hardening`).
-- Changes destined for both systems need to be cherry-picked or merged deliberately in both directions.
+- The vendor pin should always point to a commit on `regen-prod`.
+- All new work happens on feature branches merged into `regen-prod`.
 
 ## Common Operations
 
@@ -250,24 +249,12 @@ ssh root@45.132.245.30 "systemctl restart koi-api"                # Octo
 ssh root@37.27.48.12 "sudo systemctl restart gv-koi-api"          # GV (remote on poly)
 ```
 
-### Deploy updated Python files (both servers)
+### Deploy updated Python files
 ```bash
-# Sync to Octo
-rsync -avz --delete koi-processor/api/ root@45.132.245.30:/root/koi-processor/api/
-rsync -avz koi-processor/migrations/ root@45.132.245.30:/root/koi-processor/migrations/
-
-# Sync to GV (poly)
-rsync -avz --delete koi-processor/api/ root@37.27.48.12:/home/koi/koi-processor/api/
-rsync -avz koi-processor/migrations/ root@37.27.48.12:/home/koi/koi-processor/migrations/
-ssh root@37.27.48.12 "chown -R koi:koi /home/koi/koi-processor"
-
-# Restart both
-ssh root@45.132.245.30 "systemctl restart koi-api"
-ssh root@37.27.48.12 "systemctl restart gv-koi-api"
-
-# Stamp version
-git rev-parse --short HEAD | ssh root@45.132.245.30 "cat > /root/koi-processor/.version"
-git rev-parse --short HEAD | ssh root@37.27.48.12 "cat > /home/koi/koi-processor/.version"
+# Use the vendor-based deploy pipeline (see Vendor Sync & Deployment above)
+./deploy.sh --target fr    # lowest risk first
+./deploy.sh --target gv
+./deploy.sh --target octo
 ```
 
 ### Deploy updated plugin + restart OpenClaw
@@ -288,7 +275,9 @@ ssh root@45.132.245.30 "cd ~/koi-processor && venv/bin/python tests/test_koi_int
 
 ### Run a database migration
 ```bash
-cat koi-processor/migrations/038_bkc_predicates.sql | ssh root@45.132.245.30 "docker exec -i regen-koi-postgres psql -U postgres -d octo_koi"
+# Migrations are applied automatically by deploy.sh via manifests.
+# For manual one-off migrations:
+cat vendor/koi-processor/migrations/038_bkc_predicates.sql | ssh root@45.132.245.30 "docker exec -i regen-koi-postgres psql -U postgres -d octo_koi"
 ```
 
 ### Query the database
@@ -423,14 +412,12 @@ The formal ontology is at `ontology/bkc-ontology.jsonld`. It defines:
 
 ## Local Development
 
-The source files in this repo map to server paths:
+All KOI runtime code lives in the canonical repo (`~/projects/regenai/koi-processor/`) and is vendored at deploy time via `vendor/sync.sh`. There is no local copy of koi-processor in this repo — use `deploy.sh` for all deployments (see Vendor Sync & Deployment section above).
+
+The remaining source files in this repo map to server paths:
 
 | Repo path | Server path |
 |-----------|-------------|
-| `koi-processor/api/` | `/root/koi-processor/api/` |
-| `koi-processor/migrations/` | `/root/koi-processor/migrations/` |
-| `koi-processor/scripts/` | `/root/koi-processor/scripts/` |
-| `koi-processor/tests/` | `/root/koi-processor/tests/` |
 | `docker/` | `/root/koi-stack/` |
 | `scripts/` | `/root/scripts/` |
 | `systemd/` | `/etc/systemd/system/` |
@@ -440,13 +427,6 @@ The source files in this repo map to server paths:
 | `plugins/bioregional-koi/` | `/root/bioregional-koi/` |
 | `vault-seed/` | `/root/.openclaw/workspace/vault/` (subset) |
 | `ontology/` | Local vault (`~/Documents/Notes/Ontology/`) |
-
-### Workflow: Edit locally → deploy to server
-
-1. Edit files in this repo
-2. SCP changed files to server (see deploy commands above)
-3. Restart relevant service
-4. Test via API health check or entity resolution
 
 ## Related Local Projects
 
