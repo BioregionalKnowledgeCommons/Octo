@@ -150,7 +150,7 @@ If you prefer to do it manually (or need to understand each step), continue belo
 
 - A VPS with at least **2 vCPU, 4GB RAM, 40GB disk** ([Netcup](https://www.netcup.com/) VPS 1000 G11 ~$5/month, or similar)
 - Ubuntu 24.04 LTS
-- An **OpenAI API key** for semantic entity resolution (~$1-2/month)
+- An **embedding provider** — OpenAI API key (~$1-2/month) or local Ollama (free). Optional — node works without it
 - A **Google Antigravity API key** or other LLM provider key (for OpenClaw chat)
 - A **Telegram bot token** (optional — talk to [@BotFather](https://t.me/BotFather))
 - SSH access to your VPS
@@ -254,9 +254,12 @@ Fill in these values — replace everything in `<angle brackets>` with your actu
 # Password is from Step 3 (check: cat ~/.env)
 POSTGRES_URL=postgresql://postgres:<your-password>@localhost:5432/<your-db-name>
 
-# OpenAI (for semantic entity resolution — get a key at https://platform.openai.com/api-keys)
+# Embedding provider for semantic entity resolution
+# Options: openai, ollama, or omit for no embeddings (auto-selects OpenAI if OPENAI_API_KEY is set)
+# EMBEDDING_PROVIDER=openai
 OPENAI_API_KEY=<your-openai-api-key>
 EMBEDDING_MODEL=text-embedding-3-small
+# For Ollama instead: EMBEDDING_PROVIDER=ollama, OLLAMA_BASE_URL=http://host.docker.internal:11434, EMBEDDING_MODEL=nomic-embed-text
 
 # Vault — must match the directory you created in Step 5
 VAULT_PATH=/root/<your-shortname>-agent/vault
@@ -678,8 +681,13 @@ Edit `config/mine.env`:
 # PostgreSQL — the API reads POSTGRES_URL
 POSTGRES_URL=postgresql://postgres:<your-password>@localhost:5432/personal_koi
 
+# Embedding (optional — omit EMBEDDING_PROVIDER for auto-detect)
+# EMBEDDING_PROVIDER=openai        # or: ollama
 OPENAI_API_KEY=sk-...
 EMBEDDING_MODEL=text-embedding-3-small
+# For Ollama: EMBEDDING_PROVIDER=ollama, OLLAMA_BASE_URL=http://localhost:11434, EMBEDDING_MODEL=nomic-embed-text
+# Note: localhost works here because Path C runs uvicorn directly (not in Docker).
+# For Docker setups (Path A), use http://host.docker.internal:11434 instead.
 
 VAULT_PATH=/path/to/your/vault
 

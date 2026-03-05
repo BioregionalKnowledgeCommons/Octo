@@ -32,7 +32,7 @@ You don't need to finish everything — a rough charter is enough to start.
 |------|---------|
 | **VPS** | Any Linux VPS with 2+ vCPU, 4GB+ RAM. Netcup VPS 1000 G11 (~$5/mo), Hetzner, DigitalOcean, etc. |
 | **SSH access** | Root or sudo on the VPS |
-| **OpenAI API key** | For embeddings (`text-embedding-3-small`), ~$1–2/mo. Optional — node works without it. |
+| **Embedding provider** | OpenAI API key (~$1–2/mo), local Ollama, or skip. Optional — node works without it. |
 | **Budget** | ~$5–7/mo (VPS only) |
 
 ## Step 1: Bootstrap (5 min)
@@ -64,9 +64,10 @@ bash scripts/setup-node.sh
 The wizard walks you through everything interactively:
 
 1. **Node name** — e.g. "Salt Spring Island", "Cowichan Valley"
-2. **Node type** — leaf node (under a coordinator), peer, or personal
-3. **OpenAI key** — optional, press Enter to skip
-4. **API port** — default 8351
+2. **Derived config** — confirms database, directory, slug, port (Y to accept)
+3. **Node type** — leaf node (recommended), peer network, or personal/research
+4. **Embedding provider** — OpenAI (recommended), Ollama (free/local), or skip
+5. **Federation** — connect to the BKC network (recommended)
 
 The wizard automatically:
 - Builds and starts Docker containers (PostgreSQL + KOI API)

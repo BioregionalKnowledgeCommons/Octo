@@ -39,6 +39,7 @@ Optional:
   --edge-rid <rid>       Override edge RID (default: orn:koi-net.edge:<local>-polls-<peer>)
   --rid-types <array>    PostgreSQL text[] literal (default: {Practice,Pattern,CaseStudy,Bioregion})
   --container <name>     Postgres container name (default: regen-koi-postgres)
+  --api-container <name> KOI API container name for python3 fallback (default: koi-api)
   --no-handshake         Skip sending handshake to peer
   --help                 Show this help
 EOF
@@ -55,12 +56,27 @@ require_cmd() {
   fi
 }
 
+# parse_json <python_expression>
+# Reads JSON from stdin, evaluates a Python expression.
+# Tries host python3 first, falls back to container python3.
+parse_json() {
+  local expr="$1"
+  local input
+  input=$(cat)
+  if command -v python3 >/dev/null 2>&1; then
+    echo "$input" | python3 -c "$expr" 2>/dev/null
+  else
+    echo "$input" | ${KOI_DOCKER_CMD:-docker} exec -i "${API_CONTAINER}" python3 -c "$expr" 2>/dev/null
+  fi
+}
+
 DB_NAME=""
 PEER_URL=""
 LOCAL_URL="http://127.0.0.1:8351"
 EDGE_RID=""
 RID_TYPES="{Practice,Pattern,CaseStudy,Bioregion}"
 CONTAINER="regen-koi-postgres"
+API_CONTAINER="koi-api"
 DO_HANDSHAKE="true"
 
 while [[ $# -gt 0 ]]; do
@@ -71,6 +87,7 @@ while [[ $# -gt 0 ]]; do
     --edge-rid) EDGE_RID="$2"; shift 2 ;;
     --rid-types) RID_TYPES="$2"; shift 2 ;;
     --container) CONTAINER="$2"; shift 2 ;;
+    --api-container) API_CONTAINER="$2"; shift 2 ;;
     --no-handshake) DO_HANDSHAKE="false"; shift ;;
     --help|-h) usage; exit 0 ;;
     *)
@@ -87,7 +104,6 @@ if [ -z "$DB_NAME" ] || [ -z "$PEER_URL" ]; then
 fi
 
 require_cmd curl
-require_cmd python3
 require_cmd docker
 
 PEER_URL="${PEER_URL%/}"
@@ -102,12 +118,12 @@ if [ -z "$LOCAL_HEALTH" ]; then
   exit 1
 fi
 
-LOCAL_RID=$(echo "$LOCAL_HEALTH" | python3 -c "import sys,json; d=json.load(sys.stdin); n=d.get('node') or {}; print(n.get('node_rid',''))" 2>/dev/null || true)
-LOCAL_NAME=$(echo "$LOCAL_HEALTH" | python3 -c "import sys,json; d=json.load(sys.stdin); n=d.get('node') or {}; print(n.get('node_name',''))" 2>/dev/null || true)
-LOCAL_KEY=$(echo "$LOCAL_HEALTH" | python3 -c "import sys,json; d=json.load(sys.stdin); n=d.get('node') or {}; print(n.get('public_key',''))" 2>/dev/null || true)
-LOCAL_BASE=$(echo "$LOCAL_HEALTH" | python3 -c "import sys,json; d=json.load(sys.stdin); n=d.get('node') or {}; print(n.get('base_url',''))" 2>/dev/null || true)
-LOCAL_STRICT=$(echo "$LOCAL_HEALTH" | python3 -c "import sys,json; d=json.load(sys.stdin); p=d.get('protocol') or {}; print(str(bool(p.get('strict_mode', False))).lower())" 2>/dev/null || true)
-LOCAL_REQUIRE_SIGNED=$(echo "$LOCAL_HEALTH" | python3 -c "import sys,json; d=json.load(sys.stdin); p=d.get('protocol') or {}; print(str(bool(p.get('require_signed_envelopes', False))).lower())" 2>/dev/null || true)
+LOCAL_RID=$(echo "$LOCAL_HEALTH" | parse_json "import sys,json; d=json.load(sys.stdin); n=d.get('node') or {}; print(n.get('node_rid',''))" || true)
+LOCAL_NAME=$(echo "$LOCAL_HEALTH" | parse_json "import sys,json; d=json.load(sys.stdin); n=d.get('node') or {}; print(n.get('node_name',''))" || true)
+LOCAL_KEY=$(echo "$LOCAL_HEALTH" | parse_json "import sys,json; d=json.load(sys.stdin); n=d.get('node') or {}; print(n.get('public_key',''))" || true)
+LOCAL_BASE=$(echo "$LOCAL_HEALTH" | parse_json "import sys,json; d=json.load(sys.stdin); n=d.get('node') or {}; print(n.get('base_url',''))" || true)
+LOCAL_STRICT=$(echo "$LOCAL_HEALTH" | parse_json "import sys,json; d=json.load(sys.stdin); p=d.get('protocol') or {}; print(str(bool(p.get('strict_mode', False))).lower())" || true)
+LOCAL_REQUIRE_SIGNED=$(echo "$LOCAL_HEALTH" | parse_json "import sys,json; d=json.load(sys.stdin); p=d.get('protocol') or {}; print(str(bool(p.get('require_signed_envelopes', False))).lower())" || true)
 
 if [ -z "$LOCAL_RID" ] || [ -z "$LOCAL_NAME" ]; then
   err "Could not parse local node profile from /koi-net/health"
@@ -125,11 +141,11 @@ if [ -z "$PEER_HEALTH" ]; then
   exit 1
 fi
 
-PEER_RID=$(echo "$PEER_HEALTH" | python3 -c "import sys,json; d=json.load(sys.stdin); n=d.get('node') or {}; print(n.get('node_rid',''))" 2>/dev/null || true)
-PEER_NAME=$(echo "$PEER_HEALTH" | python3 -c "import sys,json; d=json.load(sys.stdin); n=d.get('node') or {}; print(n.get('node_name',''))" 2>/dev/null || true)
-PEER_KEY=$(echo "$PEER_HEALTH" | python3 -c "import sys,json; d=json.load(sys.stdin); n=d.get('node') or {}; print(n.get('public_key',''))" 2>/dev/null || true)
-PEER_STRICT=$(echo "$PEER_HEALTH" | python3 -c "import sys,json; d=json.load(sys.stdin); p=d.get('protocol') or {}; print(str(bool(p.get('strict_mode', False))).lower())" 2>/dev/null || true)
-PEER_REQUIRE_SIGNED=$(echo "$PEER_HEALTH" | python3 -c "import sys,json; d=json.load(sys.stdin); p=d.get('protocol') or {}; print(str(bool(p.get('require_signed_envelopes', False))).lower())" 2>/dev/null || true)
+PEER_RID=$(echo "$PEER_HEALTH" | parse_json "import sys,json; d=json.load(sys.stdin); n=d.get('node') or {}; print(n.get('node_rid',''))" || true)
+PEER_NAME=$(echo "$PEER_HEALTH" | parse_json "import sys,json; d=json.load(sys.stdin); n=d.get('node') or {}; print(n.get('node_name',''))" || true)
+PEER_KEY=$(echo "$PEER_HEALTH" | parse_json "import sys,json; d=json.load(sys.stdin); n=d.get('node') or {}; print(n.get('public_key',''))" || true)
+PEER_STRICT=$(echo "$PEER_HEALTH" | parse_json "import sys,json; d=json.load(sys.stdin); p=d.get('protocol') or {}; print(str(bool(p.get('strict_mode', False))).lower())" || true)
+PEER_REQUIRE_SIGNED=$(echo "$PEER_HEALTH" | parse_json "import sys,json; d=json.load(sys.stdin); p=d.get('protocol') or {}; print(str(bool(p.get('require_signed_envelopes', False))).lower())" || true)
 
 if [ -z "$PEER_RID" ] || [ -z "$PEER_NAME" ]; then
   err "Could not parse peer node profile from /koi-net/health"
@@ -173,7 +189,7 @@ ok "Local federation rows upserted"
 
 if [ "$DO_HANDSHAKE" = "true" ]; then
   info "Sending handshake to peer (register local profile/key remotely)..."
-  HANDSHAKE_PAYLOAD=$(echo "$LOCAL_HEALTH" | python3 -c "import sys,json; d=json.load(sys.stdin); n=d.get('node') or {}; print(json.dumps({'type':'handshake','profile':n}, separators=(',',':'))) if n else print('')" 2>/dev/null || true)
+  HANDSHAKE_PAYLOAD=$(echo "$LOCAL_HEALTH" | parse_json "import sys,json; d=json.load(sys.stdin); n=d.get('node') or {}; print(json.dumps({'type':'handshake','profile':n}, separators=(',',':'))) if n else print('')" || true)
   if [ -n "$HANDSHAKE_PAYLOAD" ]; then
     HS_CODE=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" \
       -H "Content-Type: application/json" \

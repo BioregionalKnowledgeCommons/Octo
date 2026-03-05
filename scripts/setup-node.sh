@@ -117,25 +117,45 @@ fi
 DB_NAME="${DB_SHORT}_koi"
 NODE_DIR="$HOME/${NODE_SLUG}"
 
+# Defaults
+API_PORT=8351
+
 echo ""
 info "Derived configuration:"
 echo "  Database:    $DB_NAME"
 echo "  Directory:   $NODE_DIR"
 echo "  Node slug:   $NODE_SLUG"
+echo "  API port:    $API_PORT"
 echo ""
 read -rp "  Look good? (Y/n) " CONFIRM
 if [[ "${CONFIRM,,}" == "n" ]]; then
   read -rp "  Database name (e.g. cv_koi): " DB_NAME
   read -rp "  Directory (e.g. $HOME/cowichan-valley): " NODE_DIR
   read -rp "  Node slug (e.g. cowichan-valley): " NODE_SLUG
+  read -rp "  API port [$API_PORT]: " INPUT_PORT
+  API_PORT="${INPUT_PORT:-$API_PORT}"
 fi
 
 # Node type
 echo ""
 echo "What type of node?"
-echo "  1) Leaf node — under a coordinator (e.g. Salish Sea)"
-echo "  2) Peer — independent bioregion"
-echo "  3) Personal/research — standalone"
+echo ""
+echo "  1) Leaf node  [recommended]"
+echo "     Joins an existing network (e.g. Salish Sea). Your node shares"
+echo "     knowledge upstream to a coordinator and receives network knowledge back."
+echo "     Most new nodes start here."
+echo ""
+echo "  2) Peer network"
+echo "     Independent bioregion that exchanges knowledge bidirectionally with"
+echo "     other networks. Choose this if you're starting a new regional network."
+echo ""
+echo "  3) Personal/research"
+echo "     Standalone knowledge graph, localhost only. No federation by default."
+echo "     Good for experimentation. Can join a network later."
+echo ""
+echo "  You can change this later — leaf nodes can grow into coordinators,"
+echo "  and personal nodes can join the network anytime."
+echo ""
 read -rp "  Choose (1/2/3) [1]: " NODE_TYPE_NUM
 NODE_TYPE_NUM="${NODE_TYPE_NUM:-1}"
 
@@ -146,18 +166,60 @@ case "$NODE_TYPE_NUM" in
   *) NODE_TYPE="Leaf node"; NODE_TYPE_NUM=1 ;;
 esac
 
-# OpenAI key
+# Embedding provider
 echo ""
-echo "OpenAI API key (for semantic entity matching, ~\$1-2/mo)."
-echo "  Get one at: https://platform.openai.com/api-keys"
-echo "  Press Enter to skip (you can add it later)."
-read -rp "  OpenAI key: " OPENAI_KEY
+echo "Semantic matching uses embeddings to find similar entities across your"
+echo "knowledge graph. It's optional — your node works without it (exact and"
+echo "fuzzy matching still work), but embeddings improve entity resolution."
+echo ""
+echo "  1) OpenAI  [recommended, ~\$1-2/mo]"
+echo "     Uses text-embedding-3-small via API. Requires an API key."
+echo ""
+echo "  2) Ollama  [free, runs locally]"
+echo "     Uses a local Ollama server. No API key needed."
+echo "     Requires Ollama installed and accessible from Docker."
+echo ""
+echo "  3) None / set up later"
+echo "     Skip for now. Add OPENAI_API_KEY to .env later to auto-enable."
+echo ""
+read -rp "  Choose (1/2/3) [1]: " EMBED_CHOICE
+EMBED_CHOICE="${EMBED_CHOICE:-1}"
 
-# API port
-API_PORT=8351
-echo ""
-read -rp "  API port [$API_PORT]: " INPUT_PORT
-API_PORT="${INPUT_PORT:-$API_PORT}"
+OPENAI_KEY=""
+EMBEDDING_PROVIDER=""
+EMBEDDING_MODEL=""
+OLLAMA_BASE_URL=""
+
+case "$EMBED_CHOICE" in
+  1)
+    EMBEDDING_PROVIDER="openai"
+    EMBEDDING_MODEL="text-embedding-3-small"
+    echo ""
+    echo "  Get a key at: https://platform.openai.com/api-keys"
+    read -rp "  OpenAI API key: " OPENAI_KEY
+    if [ -z "$OPENAI_KEY" ]; then
+      warn "No key provided. Add OPENAI_API_KEY to .env later to auto-enable semantic matching."
+      EMBEDDING_PROVIDER=""
+      EMBEDDING_MODEL=""
+    fi
+    ;;
+  2)
+    EMBEDDING_PROVIDER="ollama"
+    EMBEDDING_MODEL="nomic-embed-text"
+    OLLAMA_BASE_URL="http://host.docker.internal:11434"
+    echo ""
+    echo "  Default model: nomic-embed-text (768 dimensions)"
+    echo "  Default URL: $OLLAMA_BASE_URL (reachable from Docker)"
+    echo "  If Ollama runs on another host, enter the URL it's reachable at from Docker."
+    read -rp "  Ollama model [$EMBEDDING_MODEL]: " INPUT_MODEL
+    EMBEDDING_MODEL="${INPUT_MODEL:-$EMBEDDING_MODEL}"
+    read -rp "  Ollama URL [$OLLAMA_BASE_URL]: " INPUT_URL
+    OLLAMA_BASE_URL="${INPUT_URL:-$OLLAMA_BASE_URL}"
+    ;;
+  *)
+    info "Skipping embeddings. Add OPENAI_API_KEY to .env later to auto-enable."
+    ;;
+esac
 
 # Public IP + bind
 PUBLIC_IP=$(curl -s --max-time 5 -4 ifconfig.me 2>/dev/null || echo "")
@@ -198,9 +260,9 @@ POSTGRES_PASSWORD=$PG_PASS
 # Database
 KOI_DB_NAME=$DB_NAME
 
-# OpenAI (for semantic entity resolution)
-OPENAI_API_KEY=${OPENAI_KEY:-}
-EMBEDDING_MODEL=text-embedding-3-small
+# Embedding (semantic entity resolution)
+# Supported providers: openai, ollama, or omit for no embeddings
+# If EMBEDDING_PROVIDER is omitted but OPENAI_API_KEY is set, auto-selects OpenAI
 
 # Vault + state (paths inside container map to host mounts)
 VAULT_PATH=/data/vault
@@ -222,6 +284,12 @@ KOI_ENFORCE_SOURCE_KEY_RID_BINDING=false
 KOI_API_HOST=0.0.0.0
 KOI_API_PORT=8351
 ENVEOF
+
+# Append embedding config (only set vars)
+[ -n "$EMBEDDING_PROVIDER" ] && echo "EMBEDDING_PROVIDER=$EMBEDDING_PROVIDER" >> "$ENV_FILE"
+[ -n "$EMBEDDING_MODEL" ] && echo "EMBEDDING_MODEL=$EMBEDDING_MODEL" >> "$ENV_FILE"
+[ -n "$OPENAI_KEY" ] && echo "OPENAI_API_KEY=$OPENAI_KEY" >> "$ENV_FILE"
+[ -n "$OLLAMA_BASE_URL" ] && echo "OLLAMA_BASE_URL=$OLLAMA_BASE_URL" >> "$ENV_FILE"
 
 # Also write docker-compose override env for host-side variables
 cat > "$NODE_DIR/docker.env" << DKEOF
@@ -304,6 +372,18 @@ else
   warn "API still starting. Check: $DOCKER logs koi-api"
 fi
 
+# 7b. Ollama reachability check
+if [ "$EMBEDDING_PROVIDER" = "ollama" ]; then
+  info "Checking Ollama reachability from container..."
+  if $DOCKER exec koi-api curl -sf "$OLLAMA_BASE_URL/api/tags" &>/dev/null; then
+    ok "Ollama reachable from container at $OLLAMA_BASE_URL"
+  else
+    warn "Ollama not reachable from container at $OLLAMA_BASE_URL"
+    echo "  Make sure Ollama is running and accessible from Docker."
+    echo "  Update OLLAMA_BASE_URL in $ENV_FILE if needed."
+  fi
+fi
+
 # 8. Run migrations
 info "Running migrations..."
 MIG_COUNT=0
@@ -377,6 +457,11 @@ curl -sf -X POST "http://127.0.0.1:$API_PORT/entity/resolve" \
   && ok "Bioregion entity seeded" \
   || warn "Seeding failed (may need OpenAI key). You can seed later."
 
+echo ""
+warn "IMPORTANT: Back up $NODE_DIR/koi-state/ — it contains your node's"
+echo "  private key. If lost, you'll need to re-register with a new identity."
+echo "  cp -r $NODE_DIR/koi-state/ /safe/backup/location/"
+
 # ─── Federation ───
 header "Federation"
 
@@ -402,18 +487,26 @@ if [ "$NODE_TYPE_NUM" = "3" ]; then
   info "Personal node — skipping federation. Set it up later with:"
   echo "  bash $OCTO_DIR/scripts/connect-koi-peer.sh --db $DB_NAME --peer-url http://45.132.245.30:8351"
 else
-  echo "Connect to the Salish Sea network (Octo coordinator)?"
-  echo "  This lets your node exchange knowledge with the broader network."
+  echo ""
+  echo "Federation connects your node to the BKC network. This means:"
+  echo "  - Your node polls the coordinator for shared knowledge (practices,"
+  echo "    patterns, case studies from other bioregions)"
+  echo "  - The coordinator can poll your node for knowledge you publish"
+  echo "  - Knowledge flows via signed envelopes — you control what you share"
+  echo ""
+  echo "You can set this up later with: bash scripts/connect-koi-peer.sh"
   echo ""
   read -rp "  Set up federation now? (Y/n) " FED_CONFIRM
 
   if [[ "${FED_CONFIRM,,}" != "n" ]]; then
     COORD_URL="http://45.132.245.30:8351"
     echo ""
-    echo "  Default coordinator: Octo (Salish Sea) at 45.132.245.30"
-    read -rp "  Use default? (Y/n) " COORD_CONFIRM
+    echo "  The default coordinator is Octo (Salish Sea) — the main hub of the"
+    echo "  BKC network. Most nodes connect here first."
+    echo ""
+    read -rp "  Connect to Octo at 45.132.245.30? (Y/n) " COORD_CONFIRM
     if [[ "${COORD_CONFIRM,,}" == "n" ]]; then
-      read -rp "  Coordinator URL: " COORD_URL
+      read -rp "  Coordinator URL (e.g. http://1.2.3.4:8351): " COORD_URL
     fi
 
     # connect-koi-peer.sh needs docker access and python3 for parsing.

@@ -174,7 +174,7 @@ See [docs/new-bioregion-quickstart.md](docs/new-bioregion-quickstart.md) for the
 
 - Docker (installed automatically by `bootstrap.sh` if missing)
 - Git
-- An OpenAI API key (optional — for semantic entity resolution, ~$1-2/mo)
+- An embedding provider (OpenAI API key or local Ollama — optional, for semantic entity resolution)
 
 ### KOI-net Federation
 
