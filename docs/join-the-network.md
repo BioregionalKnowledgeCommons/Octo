@@ -127,13 +127,22 @@ Edges are configured via API calls or database inserts. See [Federation Setup](#
 
 ### Quick setup (recommended)
 
-After completing Steps 1-3 (VPS, clone repo, start PostgreSQL), you can run the interactive setup wizard which automates Steps 4-9:
+One-command bootstrap on a fresh VPS — installs Docker, clones the repo, and runs the wizard:
 
 ```bash
-bash /root/Octo/scripts/setup-node.sh
+curl -sSL https://raw.githubusercontent.com/BioregionalKnowledgeCommons/Octo/main/scripts/bootstrap.sh | bash
 ```
 
-The wizard will ask for your node name, OpenAI API key, and node type, then automatically create the database, directories, config, migrations, workspace files, and systemd service.
+Or if you already have Docker and git:
+
+```bash
+git clone https://github.com/BioregionalKnowledgeCommons/Octo.git
+cd Octo && bash scripts/setup-node.sh
+```
+
+The wizard handles everything: Docker build, database creation, migrations, keypair generation, workspace files, and federation. Everything runs in Docker — no Python/pip/venv on the host.
+
+See [new-bioregion-quickstart.md](./new-bioregion-quickstart.md) for the streamlined guide.
 
 If you prefer to do it manually (or need to understand each step), continue below.
 
@@ -946,7 +955,7 @@ docker exec -i regen-koi-postgres psql -U postgres -d YOUR_DB <<'SQL'
 
 -- Register Octo (Salish Sea coordinator)
 INSERT INTO koi_net_nodes (node_rid, node_name, node_type, base_url, public_key, status, last_seen)
-  VALUES ('orn:koi-net.node:octo-salish-sea+50a3c9eac05c807f7f0ad114aad3b50b67bbbe1015664e39988f967f9ef4502b', 'octo-salish-sea', 'FULL',
+  VALUES ('orn:koi-net.node:octo-salish-sea+f06551d75797303be1831a1e00b41cf930625961882082346cb3932175a17716', 'octo-salish-sea', 'FULL',
           'http://45.132.245.30:8351', '<OCTO_PUBLIC_KEY_BASE64>', 'active', now())
   ON CONFLICT (node_rid) DO UPDATE SET
     node_name = EXCLUDED.node_name,
@@ -960,7 +969,7 @@ INSERT INTO koi_net_nodes (node_rid, node_name, node_type, base_url, public_key,
 -- Edge semantics: source = data provider (Octo), target = poller (your node)
 INSERT INTO koi_net_edges (edge_rid, source_node, target_node, edge_type, status, rid_types)
   VALUES ('orn:koi-net.edge:YOUR-SLUG-polls-octo-salish-sea',
-          'orn:koi-net.node:octo-salish-sea+50a3c9eac05c807f7f0ad114aad3b50b67bbbe1015664e39988f967f9ef4502b',
+          'orn:koi-net.node:octo-salish-sea+f06551d75797303be1831a1e00b41cf930625961882082346cb3932175a17716',
           'YOUR_NODE_RID',
           'POLL', 'APPROVED', '{Practice,Pattern,CaseStudy,Bioregion}')
   ON CONFLICT (edge_rid) DO UPDATE SET

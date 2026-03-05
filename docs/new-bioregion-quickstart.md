@@ -1,8 +1,8 @@
 # New Bioregion Quick-Start Guide
 
-> **Audience:** Someone setting up their first BKC node. Total time: ~2 hours.
-> **Full reference:** [`join-the-network.md`](./join-the-network.md) (1,100+ lines, covers everything in depth)
-> **Last updated:** 2026-02-19
+> **Audience:** Someone setting up their first BKC node. Total time: ~30 minutes.
+> **Full reference:** [`join-the-network.md`](./join-the-network.md) (covers everything in depth)
+> **Last updated:** 2026-03-05
 
 ---
 
@@ -10,12 +10,14 @@
 
 You're setting up a **KOI node** — a bioregional knowledge backend with a PostgreSQL knowledge graph, entity resolution, and federation. Your node will store local knowledge (practices, patterns, case studies) and exchange events with the wider BKC network via signed envelopes.
 
+Everything runs in Docker — no Python, pip, or virtualenv setup needed on the host.
+
 ## Governance Prep (1–2 hours, before touching servers)
 
 Before technical setup, define what your bioregion is commoning. Copy the governance template from GitHub:
 
-- **[Pilot template directory](https://github.com/DarrenZal/BioregionalKnowledgeCommoning/tree/main/pilots/template-regional-pilot)** — 6 files to fill in
-- **[Front Range example](https://github.com/DarrenZal/BioregionalKnowledgeCommoning/tree/main/pilots/front-range-cascadia-2026)** — a completed pilot for reference
+- **[Pilot template directory](https://github.com/BioregionalKnowledgeCommons/BioregionalKnowledgeCommoning/tree/main/pilots/template-regional-pilot)** — 6 files to fill in
+- **[Front Range example](https://github.com/BioregionalKnowledgeCommons/BioregionalKnowledgeCommoning/tree/main/pilots/front-range-cascadia-2026)** — a completed pilot for reference
 
 Key files to fill in:
 1. **`pilot-charter.md`** — bioregion name, objective, co-stewards, participation profile
@@ -28,143 +30,69 @@ You don't need to finish everything — a rough charter is enough to start.
 
 | Item | Details |
 |------|---------|
-| **VPS** | Netcup VPS 1000 G11 (~$5/mo) or equivalent. Ubuntu 24.04 LTS, 2+ vCPU, 4GB+ RAM |
+| **VPS** | Any Linux VPS with 2+ vCPU, 4GB+ RAM. Netcup VPS 1000 G11 (~$5/mo), Hetzner, DigitalOcean, etc. |
 | **SSH access** | Root or sudo on the VPS |
-| **OpenAI API key** | For embeddings (`text-embedding-3-small`), ~$1–2/mo |
-| **Domain (optional)** | sslip.io works for HTTPS without a domain |
-| **Budget** | $6–7/mo backend-only, $11–27/mo with OpenClaw chat agent |
+| **OpenAI API key** | For embeddings (`text-embedding-3-small`), ~$1–2/mo. Optional — node works without it. |
+| **Budget** | ~$5–7/mo (VPS only) |
 
-## Step 1: Server Setup (30 min)
+## Step 1: Bootstrap (5 min)
 
-SSH into your VPS and install dependencies:
+SSH into your VPS and run the one-command bootstrap:
 
 ```bash
-apt update && apt install -y git python3.12 python3.12-venv python3-pip docker.io docker-compose-v2 ufw
+curl -sSL https://raw.githubusercontent.com/BioregionalKnowledgeCommons/Octo/main/scripts/bootstrap.sh | bash
 ```
 
-Clone the Octo repo:
+This installs Docker and git (if needed), clones the Octo repo, and launches the setup wizard.
+
+Or do it manually:
 
 ```bash
-cd /root
-git clone https://github.com/DarrenZal/Octo.git
+# Install Docker (if not already installed)
+curl -fsSL https://get.docker.com | sh
+
+# Clone the repo
+git clone https://github.com/BioregionalKnowledgeCommons/Octo.git
 cd Octo
-```
 
-Start the PostgreSQL container:
-
-```bash
-cd koi-stack
-docker compose up -d
-cd ..
-```
-
-## Step 2: Run Setup Wizard (15 min)
-
-```bash
+# Run the wizard
 bash scripts/setup-node.sh
 ```
 
-The wizard will interactively configure:
-- Database name, user, password
-- Node name and slug (e.g., `willamette-valley`)
-- Port assignment (default 8351)
-- `.env` file with all config
-- systemd service file
-- Workspace files (IDENTITY.md, SOUL.md)
-- ECDSA key generation for signed federation envelopes
-- Federation handshake with the coordinator (Octo)
+## Step 2: Setup Wizard (10 min)
 
-> **Safe to re-run.** The wizard is idempotent — re-running won't break existing config.
+The wizard walks you through everything interactively:
 
-## Step 3: Customize Your Node (30 min)
+1. **Node name** — e.g. "Salt Spring Island", "Cowichan Valley"
+2. **Node type** — leaf node (under a coordinator), peer, or personal
+3. **OpenAI key** — optional, press Enter to skip
+4. **API port** — default 8351
+
+The wizard automatically:
+- Builds and starts Docker containers (PostgreSQL + KOI API)
+- Creates your database with all extensions (pgvector, Apache AGE)
+- Runs all migrations (70+)
+- Generates ECDSA keypair and node identity (Node RID)
+- Creates workspace files (IDENTITY.md, SOUL.md)
+- Seeds a bioregion entity
+- Connects to the Salish Sea federation (optional)
+
+## Step 3: Customize Your Node (15 min)
 
 Edit workspace files to give your agent its identity:
 
 ```bash
-nano ~/your-agent/workspace/IDENTITY.md   # Who is your agent?
-nano ~/your-agent/workspace/SOUL.md       # What values guide it?
+nano ~/your-node/workspace/IDENTITY.md   # Who is your agent?
+nano ~/your-node/workspace/SOUL.md       # What values guide it?
 ```
 
-Reference examples:
-- [GV agent IDENTITY.md](https://github.com/DarrenZal/Octo/blob/main/gv-agent/workspace/IDENTITY.md)
-- [FR agent IDENTITY.md](https://github.com/DarrenZal/Octo/blob/main/fr-agent/workspace/IDENTITY.md)
-
-## Step 4: Seed First Content (30 min)
-
-Create 2–3 Practice notes in your vault to give the node something to work with. Use the templates in [`vault-seed/TEMPLATES/`](../vault-seed/TEMPLATES/):
-
-1. Copy `Practice-template.md` → `~/your-agent/vault/Practices/Your Practice.md`
-2. Copy `Bioregion-template.md` → `~/your-agent/vault/Bioregions/Your Bioregion.md`
-3. Fill in the YAML frontmatter fields (see templates for field descriptions)
-
-Then ingest them:
+Add practices to your vault:
 
 ```bash
-bash ~/scripts/seed-vault-entities.sh http://127.0.0.1:PORT ~/your-agent/vault
+nano ~/your-node/vault/Practices/My Practice.md
 ```
 
-Replace `PORT` with the port your wizard assigned (default 8351).
-
-## Step 5: Join the Federation (15 min)
-
-The setup wizard already attempted a handshake with the coordinator. Two things need to happen:
-
-1. **Your side (done by wizard):** Registered the coordinator's node info locally.
-2. **Coordinator's side (manual):** The wizard printed a SQL block at the end — it looks like:
-
-```
-────────────────── copy this ──────────────────
-docker exec -i regen-koi-postgres psql -U postgres -d octo_koi <<'SQL'
-INSERT INTO koi_net_nodes ...
-INSERT INTO koi_net_edges ...
-SQL
-──────────────────────────────────────────────
-```
-
-**Send this SQL block to the network coordinator** (Darren). The coordinator runs it on the Octo server, and federation begins.
-
-Then open your firewall:
-
-```bash
-ufw allow PORT
-```
-
-## You're Done When...
-
-Run these checks to verify everything is working:
-
-```bash
-# 1. Health check — should return {"status":"ok", ...}
-curl -s http://127.0.0.1:PORT/health | python3 -m json.tool
-
-# 2. KOI-net health — should show your node_rid and edge info
-curl -s http://127.0.0.1:PORT/koi-net/health | python3 -m json.tool
-
-# 3. Seeded entities — should return count > 0
-docker exec -i regen-koi-postgres psql -U postgres -d YOUR_DB \
-  -c "SELECT count(*) FROM entity_registry;"
-
-# 4. Service logs — should show "Poller started" with no errors
-journalctl -u your-koi-api -n 50 --no-pager
-
-# 5. Federation — ask the coordinator to confirm events are flowing
-```
-
-## Top 5 First-Timer Issues
-
-| Problem | Fix |
-|---------|-----|
-| Node won't start | `journalctl -u your-koi-api -f` — check for Python import errors or missing env vars |
-| Federation not connecting | Firewall open? `KOI_BASE_URL` correct in your `.env`? Port matches `ufw allow`? |
-| Wizard fails mid-run | Safe to re-run (idempotent). Check error output for missing dependencies |
-| Entity resolution feels weak | Verify `OPENAI_API_KEY` is set in your `.env` file |
-| Lost private key | Restore from `koi-state/` backup. **Back up `koi-state/` early** — the key is your node identity |
-
-Full troubleshooting table: [`join-the-network.md` § Troubleshooting](./join-the-network.md#troubleshooting)
-
-## Practice Note Template
-
-See [`vault-seed/TEMPLATES/Practice-template.md`](../vault-seed/TEMPLATES/Practice-template.md) for the full annotated template. Quick example:
+Use this template:
 
 ```yaml
 ---
@@ -172,14 +100,70 @@ See [`vault-seed/TEMPLATES/Practice-template.md`](../vault-seed/TEMPLATES/Practi
 name: Salmon Habitat Restoration
 description: Community-led stream restoration for salmon spawning habitat
 bioregion:
-  - "[[Bioregions/Willamette Valley]]"
-aggregatesInto:
-  - "[[Patterns/Commons Resource Monitoring]]"
+  - "[[Bioregions/Your Bioregion]]"
 activityStatus: alive
 tags:
   - salmon
   - restoration
 ---
+
+# Salmon Habitat Restoration
+
+Description of the practice. What is it? Who does it? Why does it matter?
 ```
 
-All YAML field names (like `bioregion`, `aggregatesInto`, `parentOrg`) are parsed by `vault_parser.py` and mapped to ontology predicates. See the template files for the full list.
+## Step 4: Federation (done by wizard)
+
+If you chose to federate during setup, the wizard already:
+1. Registered the coordinator (Octo) as a known peer
+2. Created a POLL edge (your node polls the coordinator)
+3. Sent a handshake to the coordinator
+4. Printed **reciprocal SQL** for the coordinator to run
+
+**Send the reciprocal SQL block to the coordinator** (Darren). Once they run it, knowledge flows both ways.
+
+To connect to additional peers later:
+
+```bash
+bash scripts/connect-koi-peer.sh --db your_db --peer-url http://peer-ip:8351
+```
+
+## You're Done When...
+
+```bash
+# 1. Health check — should return {"status":"healthy", ...}
+curl -s http://127.0.0.1:8351/health | python3 -m json.tool
+
+# 2. KOI-net health — should show your node_rid and peers
+curl -s http://127.0.0.1:8351/koi-net/health | python3 -m json.tool
+
+# 3. Entity count — should be > 0
+docker exec regen-koi-postgres psql -U postgres -d YOUR_DB \
+  -c "SELECT count(*) FROM entity_registry;"
+```
+
+## Managing Your Node
+
+```bash
+cd ~/Octo/docker
+docker compose logs -f koi-api    # watch logs
+docker compose restart koi-api    # restart API
+docker compose down               # stop everything
+docker compose up -d              # start everything
+```
+
+## Top 5 First-Timer Issues
+
+| Problem | Fix |
+|---------|-----|
+| Docker build fails | Run `docker compose build --no-cache` in `~/Octo/docker` |
+| API won't start | `docker compose logs koi-api` — check for missing env vars or DB connection |
+| Federation not connecting | Firewall open? `KOI_BASE_URL` correct? `ufw allow 8351` |
+| Entity resolution weak | Add `OPENAI_API_KEY` to `~/.env` and restart containers |
+| Lost private key | Restore from `koi-state/` — **back up early**, the key is your node identity |
+
+Full troubleshooting: [`join-the-network.md` § Troubleshooting](./join-the-network.md#troubleshooting)
+
+## Practice Note Template
+
+See [`vault-seed/TEMPLATES/Practice-template.md`](../vault-seed/TEMPLATES/Practice-template.md) for the full annotated template. All YAML field names (`bioregion`, `aggregatesInto`, `parentOrg`) are parsed by `vault_parser.py` and mapped to ontology predicates.

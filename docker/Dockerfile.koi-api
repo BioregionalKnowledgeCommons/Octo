@@ -1,0 +1,34 @@
+# KOI Processor API — bioregional knowledge backend
+# Built from vendored koi-processor code at a pinned SHA.
+#
+# Build context must be the Octo repo root (not docker/):
+#   docker build -f docker/Dockerfile.koi-api .
+
+FROM python:3.12-slim AS base
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git curl libpq-dev gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install Python dependencies (layer cached unless requirements change)
+COPY vendor/koi-processor/requirements.txt requirements-full.txt
+
+# Strip optional/dev deps that conflict or aren't needed at runtime
+RUN grep -v -E '^\s*#|^\s*$|^pytest|^black|^flake8|^mypy|^podcastfy|^pydub|^ffmpeg|^google-generativeai|^terminusdb' \
+    requirements-full.txt > requirements.txt \
+    && pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY vendor/koi-processor/api/ api/
+COPY vendor/koi-processor/migrations/ migrations/
+
+# Health check
+HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:${KOI_API_PORT:-8351}/health || exit 1
+
+EXPOSE ${KOI_API_PORT:-8351}
+
+CMD ["python", "-m", "uvicorn", "api.personal_ingest_api:app", \
+     "--host", "0.0.0.0", "--port", "8351"]

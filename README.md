@@ -77,7 +77,7 @@ Each node runs the same KOI API codebase with its own database, vault, and ident
 
 | Agent | Port | Node RID | Entities | KOI-net |
 |-------|------|----------|----------|---------|
-| **Octo** (Salish Sea) | 8351 | `orn:koi-net.node:octo-salish-sea+50a3c...` | 57 | Enabled (coordinator) |
+| **Octo** (Salish Sea) | 8351 | `orn:koi-net.node:octo-salish-sea+f0655...` | 70 | Enabled (coordinator) |
 | **Greater Victoria** | 37.27.48.12:8351 (remote, poly) | `orn:koi-net.node:greater-victoria+81ec4...` | 4 | Enabled (leaf node) |
 | **Front Range** | 127.0.0.1:8355 (localhost on Octo) | `orn:koi-net.node:front-range+b5429...` | 4 | Enabled (peer node) |
 
@@ -118,107 +118,63 @@ See [ontology/bkc-ontology.jsonld](ontology/bkc-ontology.jsonld) for the formal 
 │   ├── IDENTITY.md         # Who Octo is
 │   ├── SOUL.md             # Philosophy and values
 │   ├── KNOWLEDGE.md        # BKC domain expertise
-│   ├── USER.md             # About the human operator
-│   ├── AGENTS.md           # Agent routing and session rules
-│   ├── TOOLS.md            # Environment-specific tool config
-│   └── HEARTBEAT.md        # Periodic check tasks
-├── gv-agent/               # Greater Victoria leaf node (deployed on poly 37.27.48.12)
-│   ├── config/gv.env       # GV-specific env (DB, port, node name)
-│   ├── workspace/          # GV agent identity (IDENTITY.md, SOUL.md)
-│   └── vault/              # GV seed entities (Practices/, Bioregions/)
-├── fr-agent/               # Front Range peer node (deployed on Octo server, port 8355)
-│   ├── config/fr.env       # FR-specific env (DB, port, node name)
-│   ├── workspace/          # FR agent identity (IDENTITY.md, SOUL.md)
-│   └── vault/              # FR seed entities (Practices/, Bioregions/)
+│   └── TOOLS.md            # Environment-specific tool config
+├── vendor/                 # Vendored KOI runtime code (pinned SHA)
+│   ├── pin.txt             # Canonical commit SHA to deploy
+│   ├── sync.sh             # Fetch + vendor at pinned SHA (GitHub fallback)
+│   └── koi-processor/      # Vendored code (api/, migrations/, requirements.txt)
+├── docker/                 # Docker stack (PostgreSQL + KOI API)
+│   ├── docker-compose.yml  # Full stack: postgres + koi-api
+│   ├── Dockerfile.koi-api  # KOI API image (Python 3.12, from vendored code)
+│   ├── Dockerfile.postgres-age  # PostgreSQL with pgvector + Apache AGE
+│   ├── init-extensions.sql
+│   └── create-additional-dbs.sh
+├── scripts/                # Setup + management
+│   ├── bootstrap.sh        # One-command VPS bootstrap (curl|bash)
+│   ├── setup-node.sh       # Interactive setup wizard (Docker-based)
+│   ├── connect-koi-peer.sh # Idempotent peer/coordinator connect helper
+│   ├── manage-agents.sh    # Start/stop/status for all agents
+│   └── test-federation.sh  # End-to-end federation test
+├── deploy.sh               # Vendor sync → rsync → migrate → restart → health check
+├── gv-agent/               # Greater Victoria leaf node config
+├── fr-agent/               # Front Range peer node config
 ├── plugins/
 │   └── bioregional-koi/    # OpenClaw plugin connecting to KOI API
-│       ├── openclaw.plugin.json
-│       └── index.ts
-├── koi-processor/          # Python backend (shared by all agents)
-│   ├── api/
-│   │   ├── personal_ingest_api.py   # Main API (FastAPI/uvicorn)
-│   │   ├── entity_schema.py         # 15 entity types, resolution config
-│   │   ├── vault_parser.py          # YAML→predicate mapping
-│   │   ├── web_fetcher.py           # URL fetch, Playwright, content extraction
-│   │   ├── koi_net_router.py        # KOI-net protocol endpoints
-│   │   ├── koi_envelope.py          # ECDSA P-256 signed envelopes
-│   │   ├── koi_poller.py            # Background federation poller
-│   │   ├── koi_protocol.py          # Wire format models (Pydantic)
-│   │   ├── event_queue.py           # DB-backed event queue
-│   │   └── node_identity.py         # Keypair + node RID generation
-│   ├── config/
-│   │   └── personal.env.example
-│   ├── migrations/
-│   │   ├── 038_bkc_predicates.sql
-│   │   ├── 039_koi_net_events.sql   # Event queue, edges, nodes tables
-│   │   ├── 039b_ontology_mappings.sql # Source schemas + mappings
-│   │   ├── 040_entity_koi_rids.sql  # KOI RID column on entity_registry
-│   │   ├── 041_cross_references.sql # Cross-references for federation
-│   │   └── 042_web_submissions.sql  # URL submission tracking
-│   ├── scripts/
-│   │   └── backfill_koi_rids.py     # One-time RID backfill
-│   ├── tests/
-│   │   └── test_koi_interop.py      # KOI-net protocol interop tests
-│   └── requirements.txt
-├── docker/                 # PostgreSQL stack with pgvector + Apache AGE
-│   ├── docker-compose.yml
-│   ├── Dockerfile.postgres-age
-│   ├── init-extensions.sql
-│   └── create-additional-dbs.sh     # Create DBs for new agents
-├── scripts/                # Multi-agent management
-│   ├── manage-agents.sh    # Start/stop/status for all agents
-│   ├── agents.conf         # Agent registry (name:service:port)
-│   ├── connect-koi-peer.sh # Idempotent peer/coordinator connect helper
-│   └── test-federation.sh  # End-to-end federation test
 ├── ontology/               # Formal BKC ontology (JSON-LD)
 │   └── bkc-ontology.jsonld
 ├── vault-seed/             # Seed entity notes exercising the full predicate chain
-├── systemd/                # Service definitions
-│   ├── koi-api.service           # Octo (port 8351)
-│   ├── fr-koi-api.service        # Front Range (port 8355)
-│   └── koi-api.service.example  # Template for new leaf nodes
-└── docs/                   # Strategy and implementation plans
-    ├── join-the-network.md
-    ├── koi-alignment.md
-    ├── holonic-bioregional-knowledge-commons.md
-    ├── ontological-architecture.md
-    └── implementation-plan.md
+└── docs/                   # Guides and strategy
+    ├── new-bioregion-quickstart.md  # Quick-start guide (~30 min)
+    ├── join-the-network.md          # Comprehensive reference (all paths)
+    └── ...
 ```
 
-## Deployment
+## Getting Started
+
+### One-Command Bootstrap (Fresh VPS)
+
+```bash
+curl -sSL https://raw.githubusercontent.com/BioregionalKnowledgeCommons/Octo/main/scripts/bootstrap.sh | bash
+```
+
+This installs Docker and git, clones the repo, and launches the interactive setup wizard. Everything runs in Docker — no Python/pip/venv on the host.
+
+### Manual Setup
+
+```bash
+git clone https://github.com/BioregionalKnowledgeCommons/Octo.git && cd Octo
+bash scripts/setup-node.sh
+```
+
+The wizard handles: vendor sync, Docker build, database creation, migrations, keypair generation, workspace files, and federation connection.
+
+See [docs/new-bioregion-quickstart.md](docs/new-bioregion-quickstart.md) for the full walkthrough.
 
 ### Prerequisites
 
-- [OpenClaw](https://github.com/DarrenZal/openclaw) (our fork) installed and configured
-- Docker and Docker Compose
-- Python 3.12+
-- An OpenAI API key (for semantic entity resolution)
-
-### Quick Start (Single Agent)
-
-```bash
-git clone https://github.com/DarrenZal/Octo.git && cd Octo
-cp koi-processor/config/personal.env.example koi-processor/config/personal.env
-# Edit personal.env with your credentials
-
-cd docker && docker compose up -d && cd ..
-cd koi-processor && python3 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-cat migrations/038_bkc_predicates.sql | docker exec -i regen-koi-postgres psql -U postgres -d octo_koi
-
-source config/personal.env
-uvicorn api.personal_ingest_api:app --host 127.0.0.1 --port 8351
-```
-
-### Adding a Leaf Node
-
-```bash
-# Recommended: run the interactive setup wizard
-bash scripts/setup-node.sh
-
-# Manual path (advanced): create DB + service/env yourself
-bash docker/create-additional-dbs.sh gv_koi
-```
+- Docker (installed automatically by `bootstrap.sh` if missing)
+- Git
+- An OpenAI API key (optional — for semantic entity resolution, ~$1-2/mo)
 
 ### KOI-net Federation
 

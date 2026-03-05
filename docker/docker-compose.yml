@@ -1,7 +1,11 @@
-version: '3.8'
-
-# Octo KOI Stack - PostgreSQL with pgvector + Apache AGE
-# Bound to localhost only for security
+# BKC KOI Node Stack
+# PostgreSQL (pgvector + Apache AGE) + KOI Processor API
+#
+# Usage:
+#   docker compose up -d              # start everything
+#   docker compose logs -f koi-api    # watch API logs
+#   docker compose down               # stop
+#   docker compose down -v            # stop + delete data
 
 services:
   postgres:
@@ -22,6 +26,32 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
+
+  koi-api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.koi-api
+    container_name: koi-api
+    env_file:
+      - ${KOI_ENV_FILE:-.env}
+    environment:
+      # Override POSTGRES_URL to use Docker network hostname
+      POSTGRES_URL: postgresql://postgres:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${KOI_DB_NAME:-octo_koi}
+    ports:
+      - "${KOI_API_BIND:-0.0.0.0}:${KOI_API_PORT:-8351}:8351"
+    volumes:
+      - ${KOI_VAULT_PATH:-./vault}:/data/vault
+      - ${KOI_STATE_DIR:-./koi-state}:/data/koi-state
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8351/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
     restart: unless-stopped
 
 volumes:

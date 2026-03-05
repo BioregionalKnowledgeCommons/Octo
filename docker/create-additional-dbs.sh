@@ -6,8 +6,9 @@
 #   ./create-additional-dbs.sh cv_koi                  # Phase 4.5
 #   ./create-additional-dbs.sh                         # No args = default set
 
-CONTAINER="regen-koi-postgres"
-PSQL="docker exec -i $CONTAINER psql -U postgres"
+CONTAINER="${KOI_DOCKER_CONTAINER:-regen-koi-postgres}"
+DOCKER_CMD="${KOI_DOCKER_CMD:-docker}"
+PSQL="$DOCKER_CMD exec -i $CONTAINER psql -U postgres"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
@@ -32,7 +33,7 @@ EOF
 
   # Bootstrap predicates
   echo "Bootstrapping predicates for $DB_NAME..."
-  PREDICATE_SQL="$REPO_DIR/koi-processor/migrations/038_bkc_predicates.sql"
+  PREDICATE_SQL="$REPO_DIR/vendor/koi-processor/migrations/038_bkc_predicates.sql"
   if [ -f "$PREDICATE_SQL" ]; then
     cat "$PREDICATE_SQL" | $PSQL -d "$DB_NAME"
   else

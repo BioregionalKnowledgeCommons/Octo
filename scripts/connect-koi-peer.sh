@@ -92,7 +92,8 @@ require_cmd docker
 
 PEER_URL="${PEER_URL%/}"
 LOCAL_URL="${LOCAL_URL%/}"
-PSQL="docker exec -i $CONTAINER psql -U postgres -d $DB_NAME"
+DOCKER_CMD="${KOI_DOCKER_CMD:-docker}"
+PSQL="$DOCKER_CMD exec -i $CONTAINER psql -U postgres -d $DB_NAME"
 
 info "Checking local KOI health at $LOCAL_URL..."
 LOCAL_HEALTH=$(curl -s --max-time 8 "$LOCAL_URL/koi-net/health" || true)
@@ -149,7 +150,7 @@ if [ -z "$EDGE_RID" ]; then
   EDGE_RID="orn:koi-net.edge:$(slugify "$LOCAL_NAME")-polls-$(slugify "$PEER_NAME")"
 fi
 
-if ! docker exec "$CONTAINER" pg_isready -U postgres >/dev/null 2>&1; then
+if ! $DOCKER_CMD exec "$CONTAINER" pg_isready -U postgres >/dev/null 2>&1; then
   err "PostgreSQL container '$CONTAINER' is not ready"
   exit 1
 fi

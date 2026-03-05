@@ -3,10 +3,20 @@ set -euo pipefail
 
 # Configuration - update this to the canonical repo location
 CANONICAL_REPO="${CANONICAL_REPO:-/Users/darrenzal/projects/RegenAI/koi-processor}"
+GITHUB_REPO="https://github.com/gaiaaiagent/koi-processor.git"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PIN=$(cat "$SCRIPT_DIR/pin.txt")
 VENDOR_DIR="$SCRIPT_DIR/koi-processor"
+
+# If canonical repo not available locally, clone from GitHub
+CLEANUP_CANONICAL=""
+if [ ! -d "$CANONICAL_REPO/.git" ]; then
+    echo "Canonical repo not found locally. Cloning from GitHub..."
+    CANONICAL_REPO=$(mktemp -d)
+    CLEANUP_CANONICAL=true
+    git clone --bare "$GITHUB_REPO" "$CANONICAL_REPO"
+fi
 
 echo "Syncing koi-processor at commit $PIN"
 echo "Source: $CANONICAL_REPO"
@@ -34,6 +44,8 @@ rsync -a --delete \
     --exclude='venv/' \
     --exclude='.env' \
     "$TMPDIR/" "$VENDOR_DIR/"
+
+if [ "$CLEANUP_CANONICAL" = "true" ]; then rm -rf "$CANONICAL_REPO"; fi
 
 echo "Vendored koi-processor at $PIN"
 echo "Files synced to $VENDOR_DIR"

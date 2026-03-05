@@ -478,7 +478,22 @@ The remaining source files in this repo map to server paths:
 1. **Phase 0.5: BKC CoIP vault audit** — blocked on access from Andrea Farias / Vincent Arena
 2. **Phase 5: Cascadia coordinator** — after CV is running, proves holon pattern
 
-### Adding a New Agent (Quick Reference)
+### New Node Onboarding (External — Fresh VPS)
+
+For someone setting up their own BKC federation node on a new server:
+
+```bash
+# One-command bootstrap (installs Docker, clones repo, runs wizard)
+curl -sSL https://raw.githubusercontent.com/BioregionalKnowledgeCommons/Octo/main/scripts/bootstrap.sh | bash
+```
+
+Everything runs in Docker — no Python/pip/venv on the host. The wizard handles database creation, migrations, keypair generation, workspace files, and federation connection.
+
+See `docs/new-bioregion-quickstart.md` for the full guide.
+
+### Adding a New Agent on the Octo Server
+
+For adding a co-located agent on 45.132.245.30 (like FR):
 
 ```bash
 # 1. Create database

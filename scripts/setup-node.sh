@@ -1,9 +1,9 @@
 #!/bin/bash
 # Interactive setup wizard for a new KOI federation node.
-# Run this after completing Steps 1-3 of docs/join-the-network.md
-# (VPS provisioned, Octo repo cloned, PostgreSQL running).
+# Everything runs in Docker — no Python/pip/venv on the host.
 #
-# Usage: bash /root/Octo/scripts/setup-node.sh
+# Usage: bash scripts/setup-node.sh
+# Works as root or with sudo.
 
 set -euo pipefail
 
@@ -23,39 +23,83 @@ warn()  { echo -e "${YELLOW}!${NC} $1"; }
 err()   { echo -e "${RED}✗${NC} $1"; }
 header(){ echo -e "\n${BOLD}── $1 ──${NC}\n"; }
 
-# ─── Pre-flight checks ───
+# ─── Pre-flight ───
 header "KOI Node Setup Wizard"
-echo "This will set up a new KOI federation node on this server."
-echo "Make sure you've completed Steps 1-3 of the guide first:"
-echo "  - VPS provisioned with Docker, Python 3, Node.js"
-echo "  - Octo repo cloned to /root/Octo"
-echo "  - PostgreSQL running (docker compose up -d)"
+echo "This will set up a bioregional knowledge node on this server."
+echo "Everything runs in Docker — no Python setup needed."
 echo ""
 
-# Check Docker is running
-if ! docker exec regen-koi-postgres pg_isready -U postgres &>/dev/null; then
-  err "PostgreSQL container not running. Start it first:"
-  echo "  cd $OCTO_DIR/docker && docker compose up -d"
+# Detect privilege level
+if [ "$(id -u)" -eq 0 ]; then
+  SUDO=""
+else
+  SUDO="sudo"
+  info "Not running as root — will use sudo for system operations"
+fi
+
+# ─── Install Docker if needed ───
+if ! command -v docker &>/dev/null; then
+  info "Installing Docker..."
+  $SUDO apt-get update -qq &>/dev/null
+  $SUDO apt-get install -y -qq curl &>/dev/null
+  if ! curl -fsSL https://get.docker.com | $SUDO sh &>/dev/null 2>&1; then
+    info "Docker script had issues, trying manual install..."
+    $SUDO apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-compose-plugin docker-buildx-plugin &>/dev/null 2>&1 \
+      || $SUDO apt-get install -y -qq docker.io docker-compose-v2 &>/dev/null
+  fi
+  if command -v docker &>/dev/null; then
+    ok "Docker installed"
+  else
+    err "Failed to install Docker. Install it manually and re-run."
+    exit 1
+  fi
+fi
+
+if ! $SUDO docker info &>/dev/null 2>&1; then
+  info "Starting Docker..."
+  $SUDO systemctl start docker 2>/dev/null || $SUDO service docker start 2>/dev/null || true
+  sleep 3
+fi
+
+if ! $SUDO docker info &>/dev/null 2>&1; then
+  err "Docker failed to start"
   exit 1
 fi
-ok "PostgreSQL is running"
+ok "Docker is running"
 
-# Check Python venv exists or can be created
-if [ ! -d "$OCTO_DIR/koi-processor/venv" ]; then
-  info "Python virtualenv not found. Creating it..."
-  python3 -m venv "$OCTO_DIR/koi-processor/venv"
-  "$OCTO_DIR/koi-processor/venv/bin/pip" install -q -r "$OCTO_DIR/koi-processor/requirements.txt"
-  ok "Python virtualenv created and dependencies installed"
+# Docker command prefix (handles sudo)
+if [ -n "$SUDO" ]; then
+  DOCKER="$SUDO docker"
+  DC="$SUDO docker compose"
 else
-  ok "Python virtualenv exists"
+  DOCKER="docker"
+  DC="docker compose"
+fi
+
+# ─── Vendor sync (fetch KOI code if not present) ───
+KOI_CODE="$OCTO_DIR/vendor/koi-processor"
+if [ ! -d "$KOI_CODE/api" ]; then
+  info "Fetching KOI runtime code..."
+  # Need git for vendor sync
+  if ! command -v git &>/dev/null; then
+    $SUDO apt-get update -qq &>/dev/null
+    $SUDO apt-get install -y -qq git &>/dev/null
+  fi
+  bash "$OCTO_DIR/vendor/sync.sh"
+  if [ ! -d "$KOI_CODE/api" ]; then
+    err "Failed to fetch KOI code. Check vendor/sync.sh"
+    exit 1
+  fi
+  ok "KOI code fetched (pin: $(head -c 8 "$OCTO_DIR/vendor/pin.txt"))"
+else
+  ok "KOI runtime code present"
 fi
 
 # ─── Gather info ───
 header "Node Configuration"
 
-# Node name
 echo "What is your bioregion or node name?"
-echo "  Examples: Cowichan Valley, Front Range, Boulder Creek"
+echo "  Examples: Salt Spring Island, Cowichan Valley, Front Range"
 read -rp "  Node name: " NODE_FULL_NAME
 
 if [ -z "$NODE_FULL_NAME" ]; then
@@ -63,139 +107,111 @@ if [ -z "$NODE_FULL_NAME" ]; then
   exit 1
 fi
 
-# Derive short name (lowercase, hyphens for spaces)
+# Derive names
 NODE_SLUG=$(echo "$NODE_FULL_NAME" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | sed 's/[^a-z0-9-]//g')
-# Derive even shorter name for DB (first letters of each word, or first 2 words abbreviated)
 DB_SHORT=$(echo "$NODE_FULL_NAME" | tr '[:upper:]' '[:lower:]' | awk '{for(i=1;i<=NF;i++) printf substr($i,1,1)}' | sed 's/[^a-z]//g')
-# If single word, use first 4 chars
 if [ ${#DB_SHORT} -le 1 ]; then
   DB_SHORT=$(echo "$NODE_SLUG" | head -c 6)
 fi
 
 DB_NAME="${DB_SHORT}_koi"
-AGENT_DIR="/root/${DB_SHORT}-agent"
-SERVICE_NAME="${DB_SHORT}-koi-api"
+NODE_DIR="$HOME/${NODE_SLUG}"
 
 echo ""
-info "Based on \"$NODE_FULL_NAME\", here are your derived names:"
-echo "  Database:        $DB_NAME"
-echo "  Agent directory: $AGENT_DIR"
-echo "  systemd service: $SERVICE_NAME"
-echo "  KOI node name:   $NODE_SLUG"
+info "Derived configuration:"
+echo "  Database:    $DB_NAME"
+echo "  Directory:   $NODE_DIR"
+echo "  Node slug:   $NODE_SLUG"
 echo ""
 read -rp "  Look good? (Y/n) " CONFIRM
 if [[ "${CONFIRM,,}" == "n" ]]; then
-  echo ""
   read -rp "  Database name (e.g. cv_koi): " DB_NAME
-  read -rp "  Agent directory (e.g. /root/cv-agent): " AGENT_DIR
-  read -rp "  systemd service name (e.g. cv-koi-api): " SERVICE_NAME
-  read -rp "  KOI node name (e.g. cowichan-valley): " NODE_SLUG
+  read -rp "  Directory (e.g. $HOME/cowichan-valley): " NODE_DIR
+  read -rp "  Node slug (e.g. cowichan-valley): " NODE_SLUG
 fi
 
 # Node type
 echo ""
-echo "What type of node is this?"
-echo "  1) Leaf node — sub-bioregion under a coordinator (e.g. under Salish Sea)"
-echo "  2) Peer network — independent bioregion, exchanges knowledge as equals"
-echo "  3) Personal/research — standalone, optional federation"
-read -rp "  Choose (1/2/3): " NODE_TYPE_NUM
+echo "What type of node?"
+echo "  1) Leaf node — under a coordinator (e.g. Salish Sea)"
+echo "  2) Peer — independent bioregion"
+echo "  3) Personal/research — standalone"
+read -rp "  Choose (1/2/3) [1]: " NODE_TYPE_NUM
+NODE_TYPE_NUM="${NODE_TYPE_NUM:-1}"
 
 case "$NODE_TYPE_NUM" in
   1) NODE_TYPE="Leaf node" ;;
   2) NODE_TYPE="Peer network" ;;
   3) NODE_TYPE="Personal/research" ;;
-  *) NODE_TYPE="Leaf node" ;;
+  *) NODE_TYPE="Leaf node"; NODE_TYPE_NUM=1 ;;
 esac
 
-# PostgreSQL password
+# OpenAI key
 echo ""
-if [ -f ~/.env ] && grep -q POSTGRES_PASSWORD ~/.env; then
-  PG_PASS=$(grep POSTGRES_PASSWORD ~/.env | head -1 | cut -d= -f2)
-  ok "Found PostgreSQL password in ~/.env"
-else
-  read -rp "  PostgreSQL password (from Step 3): " PG_PASS
-  if [ -z "$PG_PASS" ]; then
-    err "Password required"
-    exit 1
-  fi
-fi
-
-# OpenAI API key
-echo ""
-echo "OpenAI API key (for semantic entity resolution, ~\$1-2/month)."
+echo "OpenAI API key (for semantic entity matching, ~\$1-2/mo)."
 echo "  Get one at: https://platform.openai.com/api-keys"
-read -rp "  OpenAI API key: " OPENAI_KEY
-
-if [ -z "$OPENAI_KEY" ]; then
-  warn "No OpenAI key provided. Semantic matching will be disabled."
-  warn "You can add it later in $AGENT_DIR/config/${DB_SHORT}.env"
-fi
+echo "  Press Enter to skip (you can add it later)."
+read -rp "  OpenAI key: " OPENAI_KEY
 
 # API port
 API_PORT=8351
 echo ""
-echo "KOI API port (default 8351). Change if running multiple nodes on one server."
 read -rp "  API port [$API_PORT]: " INPUT_PORT
 API_PORT="${INPUT_PORT:-$API_PORT}"
 
-# Bind host + base URL defaults
-PUBLIC_IP=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || echo "")
+# Public IP + bind
+PUBLIC_IP=$(curl -s --max-time 5 -4 ifconfig.me 2>/dev/null || echo "")
 if [ "$NODE_TYPE_NUM" = "3" ]; then
-  API_BIND_HOST="127.0.0.1"
+  API_BIND="127.0.0.1"
 else
-  API_BIND_HOST="0.0.0.0"
+  API_BIND="0.0.0.0"
 fi
 
 if [ -n "$PUBLIC_IP" ]; then
-  KOI_BASE_URL_DEFAULT="http://$PUBLIC_IP:$API_PORT"
+  KOI_BASE_URL="http://$PUBLIC_IP:$API_PORT"
 else
-  KOI_BASE_URL_DEFAULT="http://127.0.0.1:$API_PORT"
-  warn "Could not detect public IP. KOI_BASE_URL defaults to localhost; update it for federation."
+  KOI_BASE_URL="http://127.0.0.1:$API_PORT"
+  warn "Could not detect public IP. Update KOI_BASE_URL in .env for federation."
 fi
 
 # ─── Create everything ───
 header "Setting Up Node"
 
-# 1. Create database
-info "Creating database $DB_NAME..."
-if docker exec regen-koi-postgres psql -U postgres -tc "SELECT 1 FROM pg_database WHERE datname = '$DB_NAME'" | grep -q 1; then
-  warn "Database $DB_NAME already exists, skipping creation"
-else
-  bash "$OCTO_DIR/docker/create-additional-dbs.sh" "$DB_NAME"
-  ok "Database $DB_NAME created"
-fi
+# 1. Create node directory
+info "Creating $NODE_DIR..."
+mkdir -p "$NODE_DIR"/{vault,koi-state,workspace}
+mkdir -p "$NODE_DIR"/vault/{Bioregions,Practices,Patterns,Organizations,Projects,Concepts,People,Locations,CaseStudies,Protocols,Playbooks,Questions,Claims,Evidence,Sources}
+ok "Directory created"
 
-# 2. Create agent directory
-info "Creating agent directory $AGENT_DIR..."
-mkdir -p "$AGENT_DIR"/{config,workspace,vault}
-mkdir -p "$AGENT_DIR"/vault/{Bioregions,Practices,Patterns,Organizations,Projects,Concepts,People,Locations,CaseStudies,Protocols,Playbooks,Questions,Claims,Evidence,Sources}
-ok "Agent directory created with vault subdirectories"
+# 2. Generate password
+PG_PASS=$(openssl rand -hex 16 2>/dev/null || python3 -c "import secrets; print(secrets.token_hex(16))" 2>/dev/null || echo "changeme-$(date +%s)")
 
-# 3. Generate env file
-info "Generating config file..."
-ENV_FILE="$AGENT_DIR/config/${DB_SHORT}.env"
+# 3. Write env file
+ENV_FILE="$NODE_DIR/.env"
 cat > "$ENV_FILE" << ENVEOF
-# KOI Node Configuration — $NODE_FULL_NAME
+# KOI Node: $NODE_FULL_NAME
 # Generated by setup-node.sh on $(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-# PostgreSQL — the API reads POSTGRES_URL
-POSTGRES_URL=postgresql://postgres:${PG_PASS}@localhost:5432/$DB_NAME
+# PostgreSQL
+POSTGRES_PASSWORD=$PG_PASS
+
+# Database
+KOI_DB_NAME=$DB_NAME
 
 # OpenAI (for semantic entity resolution)
-OPENAI_API_KEY=$OPENAI_KEY
+OPENAI_API_KEY=${OPENAI_KEY:-}
 EMBEDDING_MODEL=text-embedding-3-small
 
-# Vault
-VAULT_PATH=$AGENT_DIR/vault
+# Vault + state (paths inside container map to host mounts)
+VAULT_PATH=/data/vault
+KOI_STATE_DIR=/data/koi-state
 
-# KOI-net federation
+# Federation
 KOI_NET_ENABLED=true
 KOI_NODE_NAME=$NODE_SLUG
-KOI_STATE_DIR=/root/koi-state
-KOI_BASE_URL=$KOI_BASE_URL_DEFAULT
+KOI_BASE_URL=$KOI_BASE_URL
 
-# KOI protocol validation policy
-# Leave strict mode off until all federation peers support signed envelopes.
+# Validation (relaxed for bootstrap — tighten later)
 KOI_STRICT_MODE=false
 KOI_REQUIRE_SIGNED_ENVELOPES=false
 KOI_REQUIRE_SIGNED_RESPONSES=false
@@ -203,47 +219,108 @@ KOI_ENFORCE_TARGET_MATCH=false
 KOI_ENFORCE_SOURCE_KEY_RID_BINDING=false
 
 # API
-KOI_API_HOST=$API_BIND_HOST
-KOI_API_PORT=$API_PORT
+KOI_API_HOST=0.0.0.0
+KOI_API_PORT=8351
 ENVEOF
 
-# Also copy to koi-processor config for convenience
-cp "$ENV_FILE" "$OCTO_DIR/koi-processor/config/${DB_SHORT}.env"
+# Also write docker-compose override env for host-side variables
+cat > "$NODE_DIR/docker.env" << DKEOF
+POSTGRES_PASSWORD=$PG_PASS
+KOI_DB_NAME=$DB_NAME
+KOI_ENV_FILE=$NODE_DIR/.env
+KOI_VAULT_PATH=$NODE_DIR/vault
+KOI_STATE_DIR=$NODE_DIR/koi-state
+KOI_API_PORT=$API_PORT
+KOI_API_BIND=$API_BIND
+DKEOF
+
 ok "Config written to $ENV_FILE"
 
-# 4. Create base schema by starting API briefly
-info "Creating base database schema (starting API briefly)..."
-cd "$OCTO_DIR/koi-processor"
-set -a; source "$ENV_FILE"; set +a
-timeout 15 venv/bin/uvicorn api.personal_ingest_api:app --host 127.0.0.1 --port "$API_PORT" &>/dev/null || true
-sleep 2
+# 4. Write init-db.sql for this node's database
+INIT_DB="$NODE_DIR/init-db.sql"
+cat > "$INIT_DB" << DBEOF
+-- Auto-generated: create $DB_NAME if it doesn't exist
+SELECT 'CREATE DATABASE $DB_NAME' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '$DB_NAME')\\gexec
 
-# Verify base tables exist
-TABLE_COUNT=$(docker exec regen-koi-postgres psql -U postgres -d "$DB_NAME" -tc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'" | tr -d ' ')
-if [ "$TABLE_COUNT" -gt 0 ]; then
-  ok "Base schema created ($TABLE_COUNT tables)"
-else
-  warn "Base tables may not have been created. Trying again..."
-  timeout 15 venv/bin/uvicorn api.personal_ingest_api:app --host 127.0.0.1 --port "$API_PORT" &>/dev/null || true
+\\c $DB_NAME
+
+CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS age;
+CREATE EXTENSION IF NOT EXISTS fuzzystrmatch;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+LOAD 'age';
+ALTER DATABASE $DB_NAME SET search_path = ag_catalog, "\$user", public;
+SET search_path = ag_catalog, "\$user", public;
+SELECT create_graph('regen_graph');
+GRANT USAGE ON SCHEMA ag_catalog TO PUBLIC;
+DBEOF
+
+ok "Database init script created"
+
+# 5. Build and start containers
+info "Building and starting containers (first build takes a few minutes)..."
+cd "$OCTO_DIR/docker"
+
+# Source the docker env vars
+set -a; source "$NODE_DIR/docker.env"; set +a
+
+# Mount the node-specific init SQL alongside the default one
+export COMPOSE_FILE="$OCTO_DIR/docker/docker-compose.yml"
+
+$DC build --quiet 2>&1 | tail -3
+$DC up -d 2>&1 | tail -5
+
+info "Waiting for PostgreSQL..."
+for i in $(seq 1 60); do
+  if $DOCKER exec regen-koi-postgres pg_isready -U postgres &>/dev/null; then break; fi
   sleep 2
-fi
-
-# 5. Run additional migrations
-info "Running migrations..."
-PSQL="docker exec -i regen-koi-postgres psql -U postgres -d $DB_NAME"
-
-for MIG in 038_bkc_predicates 039_koi_net_events 039b_ontology_mappings 040_entity_koi_rids 041_cross_references 042_web_submissions; do
-  MIG_FILE="$OCTO_DIR/koi-processor/migrations/${MIG}.sql"
-  if [ -f "$MIG_FILE" ]; then
-    cat "$MIG_FILE" | $PSQL &>/dev/null && ok "  $MIG" || warn "  $MIG (may already exist)"
-  fi
 done
 
-# 6. Generate workspace files
-info "Generating workspace files..."
+if ! $DOCKER exec regen-koi-postgres pg_isready -U postgres &>/dev/null; then
+  err "PostgreSQL failed to start. Check: $DOCKER logs regen-koi-postgres"
+  exit 1
+fi
+ok "PostgreSQL is running"
 
-cat > "$AGENT_DIR/workspace/IDENTITY.md" << IDEOF
-# IDENTITY.md — $NODE_FULL_NAME Knowledge Agent
+# 6. Create node database (if not the default octo_koi)
+if [ "$DB_NAME" != "octo_koi" ]; then
+  info "Creating database $DB_NAME..."
+  $DOCKER exec -i regen-koi-postgres psql -U postgres < "$INIT_DB" &>/dev/null 2>&1 || true
+  ok "Database $DB_NAME ready"
+fi
+
+# 7. Wait for API to be healthy
+info "Waiting for KOI API..."
+for i in $(seq 1 30); do
+  if $DOCKER exec koi-api curl -sf http://localhost:8351/health &>/dev/null; then break; fi
+  sleep 2
+done
+
+if $DOCKER exec koi-api curl -sf http://localhost:8351/health &>/dev/null; then
+  ok "API is healthy"
+else
+  warn "API still starting. Check: $DOCKER logs koi-api"
+fi
+
+# 8. Run migrations
+info "Running migrations..."
+MIG_COUNT=0
+for MIG_FILE in $(ls "$KOI_CODE/migrations/"*.sql 2>/dev/null | sort); do
+  [ -f "$MIG_FILE" ] || continue
+  MIG_NAME=$(basename "$MIG_FILE" .sql)
+  cat "$MIG_FILE" | $DOCKER exec -i regen-koi-postgres psql -U postgres -d "$DB_NAME" &>/dev/null \
+    && ok "  $MIG_NAME" || warn "  $MIG_NAME (may already exist)"
+  MIG_COUNT=$((MIG_COUNT + 1))
+done
+ok "Applied $MIG_COUNT migrations"
+
+# 9. Generate workspace files
+info "Creating workspace files..."
+
+cat > "$NODE_DIR/workspace/IDENTITY.md" << IDEOF
+# $NODE_FULL_NAME Knowledge Agent
 
 - **Name:** $NODE_FULL_NAME Node
 - **Role:** Bioregional knowledge agent for $NODE_FULL_NAME
@@ -251,20 +328,16 @@ cat > "$AGENT_DIR/workspace/IDENTITY.md" << IDEOF
 
 ## What I Do
 
-I am the knowledge backend for the $NODE_FULL_NAME bioregion. I track local
-practices, patterns, and ecological knowledge specific to this place.
+I am the knowledge backend for the $NODE_FULL_NAME bioregion.
+I track local practices, patterns, and ecological knowledge specific to this place.
 
 ## Bioregional Context
 
-TODO: Describe your bioregion here — the land, water, peoples, and ecology.
-
-## Boundaries
-
-- I serve the $NODE_FULL_NAME bioregion
+TODO: Describe your bioregion — the land, water, peoples, and ecology.
 IDEOF
 
-cat > "$AGENT_DIR/workspace/SOUL.md" << SOEOF
-# SOUL.md — $NODE_FULL_NAME Node Values
+cat > "$NODE_DIR/workspace/SOUL.md" << SOEOF
+# $NODE_FULL_NAME — Values
 
 ## Core Values
 
@@ -278,11 +351,8 @@ cat > "$AGENT_DIR/workspace/SOUL.md" << SOEOF
 TODO: What makes this place unique? What does knowledge mean here?
 SOEOF
 
-ok "Workspace files created (edit them later to add bioregional detail)"
-
-# 7. Create bioregion entity
-info "Creating bioregion vault note..."
-BIOREGION_FILE="$AGENT_DIR/vault/Bioregions/$(echo "$NODE_FULL_NAME" | sed 's/[\/:]/-/g').md"
+# Bioregion vault note
+BIOREGION_FILE="$NODE_DIR/vault/Bioregions/$(echo "$NODE_FULL_NAME" | sed 's/[\/:]/-/g').md"
 cat > "$BIOREGION_FILE" << BIOEOF
 ---
 "@type": "bkc:Bioregion"
@@ -296,162 +366,76 @@ tags:
 
 TODO: Describe this bioregion — its watersheds, ecology, communities, and Indigenous territories.
 BIOEOF
-ok "Bioregion note created at vault/Bioregions/"
 
-# 8. Create systemd service
-info "Creating systemd service $SERVICE_NAME..."
-cat > "/etc/systemd/system/${SERVICE_NAME}.service" << SVCEOF
-[Unit]
-Description=$NODE_FULL_NAME KOI API
-After=network.target docker.service
+ok "Workspace and vault files created"
 
-[Service]
-Type=simple
-User=root
-WorkingDirectory=$OCTO_DIR/koi-processor
-Environment=PATH=$OCTO_DIR/koi-processor/venv/bin:/usr/bin
-EnvironmentFile=$ENV_FILE
-ExecStart=$OCTO_DIR/koi-processor/venv/bin/uvicorn api.personal_ingest_api:app --host $API_BIND_HOST --port $API_PORT
-Restart=on-failure
-RestartSec=5
+# 10. Seed bioregion entity
+info "Seeding bioregion entity..."
+curl -sf -X POST "http://127.0.0.1:$API_PORT/entity/resolve" \
+  -H "Content-Type: application/json" \
+  -d "{\"label\": \"$NODE_FULL_NAME\", \"type_hint\": \"Bioregion\"}" &>/dev/null \
+  && ok "Bioregion entity seeded" \
+  || warn "Seeding failed (may need OpenAI key). You can seed later."
 
-[Install]
-WantedBy=multi-user.target
-SVCEOF
+# ─── Federation ───
+header "Federation"
 
-systemctl daemon-reload
-systemctl enable "$SERVICE_NAME" &>/dev/null
-systemctl start "$SERVICE_NAME"
-ok "Service $SERVICE_NAME started"
-
-# 9. Wait and verify
-info "Waiting for API to start..."
-sleep 5
-
-if curl -s "http://127.0.0.1:$API_PORT/health" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status',''))" 2>/dev/null | grep -qi healthy; then
-  ok "API is healthy!"
-else
-  warn "API may still be starting. Check: journalctl -u $SERVICE_NAME -f"
-fi
-
-# 10. Seed the bioregion entity
-info "Seeding bioregion entity into database..."
-bash "$OCTO_DIR/scripts/seed-vault-entities.sh" "http://127.0.0.1:$API_PORT" "$AGENT_DIR/vault" 2>/dev/null || true
-
-# ─── Federation Setup ───
-header "Federation Setup"
-
-# Get node RID + public key
-NODE_HEALTH=$(curl -s "http://127.0.0.1:$API_PORT/koi-net/health" 2>/dev/null || echo "")
-NODE_RID=$(echo "$NODE_HEALTH" | python3 -c "import sys,json; d=json.load(sys.stdin); n=d.get('node') or {}; print(n.get('node_rid') or d.get('node_rid',''))" 2>/dev/null || echo "")
-NODE_PUBLIC_KEY=$(echo "$NODE_HEALTH" | python3 -c "import sys,json; d=json.load(sys.stdin); n=d.get('node') or {}; print(n.get('public_key') or '')" 2>/dev/null || echo "")
-NODE_BASE_URL_FOR_COORD="$KOI_BASE_URL_DEFAULT"
-COORD_HANDSHAKE_STATUS="not_attempted"
+NODE_HEALTH=$(curl -sf "http://127.0.0.1:$API_PORT/koi-net/health" 2>/dev/null || echo "")
+NODE_RID=$(echo "$NODE_HEALTH" | python3 -c "import sys,json; d=json.load(sys.stdin); n=d.get('node') or {}; print(n.get('node_rid',''))" 2>/dev/null || echo "")
 
 if [ -z "$NODE_RID" ]; then
-  warn "Could not read node RID from /koi-net/health."
+  # Try without python3 (might not be on host)
+  NODE_RID=$($DOCKER exec koi-api python -c "
+import urllib.request, json
+d = json.loads(urllib.request.urlopen('http://localhost:8351/koi-net/health').read())
+print(d.get('node',{}).get('node_rid',''))
+" 2>/dev/null || echo "")
+fi
+
+if [ -n "$NODE_RID" ]; then
+  ok "Node RID: $NODE_RID"
+else
+  warn "Could not read node RID (API may still be starting)"
 fi
 
 if [ "$NODE_TYPE_NUM" = "3" ]; then
-  info "Personal/research node — skipping federation (you can set it up later)"
+  info "Personal node — skipping federation. Set it up later with:"
+  echo "  bash $OCTO_DIR/scripts/connect-koi-peer.sh --db $DB_NAME --peer-url http://45.132.245.30:8351"
 else
-  echo "Do you want to connect this node to the Salish Sea network (Octo coordinator)?"
+  echo "Connect to the Salish Sea network (Octo coordinator)?"
   echo "  This lets your node exchange knowledge with the broader network."
   echo ""
   read -rp "  Set up federation now? (Y/n) " FED_CONFIRM
 
   if [[ "${FED_CONFIRM,,}" != "n" ]]; then
-    # Coordinator defaults (Octo / Salish Sea)
-    COORD_RID="orn:koi-net.node:octo-salish-sea+50a3c9eac05c807f7f0ad114aad3b50b67bbbe1015664e39988f967f9ef4502b"
-    COORD_NAME="octo-salish-sea"
     COORD_URL="http://45.132.245.30:8351"
-
     echo ""
     echo "  Default coordinator: Octo (Salish Sea) at 45.132.245.30"
     read -rp "  Use default? (Y/n) " COORD_CONFIRM
-
     if [[ "${COORD_CONFIRM,,}" == "n" ]]; then
-      read -rp "  Coordinator node RID: " COORD_RID
-      read -rp "  Coordinator name: " COORD_NAME
-      read -rp "  Coordinator URL (e.g. http://1.2.3.4:8351): " COORD_URL
+      read -rp "  Coordinator URL: " COORD_URL
     fi
 
-    # Try to discover coordinator RID/public key from health endpoint
-    COORD_HEALTH=$(curl -s --max-time 8 "$COORD_URL/koi-net/health" 2>/dev/null || echo "")
-    COORD_PUBLIC_KEY=""
-    if [ -n "$COORD_HEALTH" ]; then
-      COORD_RID_DETECTED=$(echo "$COORD_HEALTH" | python3 -c "import sys,json; d=json.load(sys.stdin); n=d.get('node') or {}; print(n.get('node_rid') or d.get('node_rid',''))" 2>/dev/null || echo "")
-      COORD_PUBLIC_KEY=$(echo "$COORD_HEALTH" | python3 -c "import sys,json; d=json.load(sys.stdin); n=d.get('node') or {}; print(n.get('public_key') or '')" 2>/dev/null || echo "")
-      if [ -n "$COORD_RID_DETECTED" ] && [ "$COORD_RID_DETECTED" != "$COORD_RID" ]; then
-        warn "Coordinator RID mismatch (configured=$COORD_RID, detected=$COORD_RID_DETECTED). Using detected RID."
-        COORD_RID="$COORD_RID_DETECTED"
-      fi
+    # connect-koi-peer.sh needs docker access and python3 for parsing.
+    # Run it via the koi-api container to avoid host Python dependency.
+    info "Connecting to federation..."
+    if KOI_DOCKER_CMD="$DOCKER" bash "$OCTO_DIR/scripts/connect-koi-peer.sh" \
+        --db "$DB_NAME" \
+        --local-url "http://127.0.0.1:$API_PORT" \
+        --peer-url "$COORD_URL" \
+        --container "regen-koi-postgres" \
+        --rid-types "{Practice,Pattern,CaseStudy,Bioregion,Organization,Project,Concept}"; then
+      COORD_STATUS="ok"
     else
-      warn "Could not fetch coordinator health from $COORD_URL"
+      warn "Federation had issues. Retry later:"
+      echo "  KOI_DOCKER_CMD=\"$DOCKER\" bash $OCTO_DIR/scripts/connect-koi-peer.sh --db $DB_NAME --peer-url $COORD_URL"
+      COORD_STATUS="failed"
     fi
 
-    # Edge RID: shortname-polls-coordinator
-    EDGE_RID="orn:koi-net.edge:${NODE_SLUG}-polls-${COORD_NAME}"
-    RID_TYPES="{Practice,Pattern,CaseStudy,Bioregion}"
-
-    PSQL_FED="docker exec -i regen-koi-postgres psql -U postgres -d $DB_NAME"
-    if [ -n "$COORD_PUBLIC_KEY" ]; then
-      COORD_PUBLIC_KEY_SQL="'$COORD_PUBLIC_KEY'"
-    else
-      COORD_PUBLIC_KEY_SQL="NULL"
-      warn "Coordinator public key unavailable. Signed response verification may fail."
+    # Open firewall if ufw is available
+    if command -v ufw &>/dev/null; then
+      $SUDO ufw allow "$API_PORT/tcp" &>/dev/null 2>&1 && ok "Firewall opened on port $API_PORT" || true
     fi
-    if [ -n "$NODE_PUBLIC_KEY" ]; then
-      NODE_PUBLIC_KEY_SQL="'$NODE_PUBLIC_KEY'"
-    else
-      NODE_PUBLIC_KEY_SQL="NULL"
-      warn "Local node public key unavailable. Coordinator must add it manually."
-    fi
-
-    # Register coordinator as known node
-    info "Registering coordinator node..."
-    echo "INSERT INTO koi_net_nodes (node_rid, node_name, node_type, base_url, public_key, status, last_seen) VALUES ('$COORD_RID', '$COORD_NAME', 'FULL', '$COORD_URL', $COORD_PUBLIC_KEY_SQL, 'active', now()) ON CONFLICT (node_rid) DO UPDATE SET node_name = EXCLUDED.node_name, node_type = EXCLUDED.node_type, base_url = EXCLUDED.base_url, public_key = COALESCE(EXCLUDED.public_key, koi_net_nodes.public_key), status = 'active', last_seen = now();" | $PSQL_FED &>/dev/null
-    ok "Coordinator registered: $COORD_NAME"
-
-    # Create edge: this node polls the coordinator
-    # Edge semantics: source = data provider (coordinator), target = poller (this node)
-    info "Creating federation edge..."
-    echo "INSERT INTO koi_net_edges (edge_rid, source_node, target_node, edge_type, status, rid_types) VALUES ('$EDGE_RID', '$COORD_RID', '$NODE_RID', 'POLL', 'APPROVED', '$RID_TYPES') ON CONFLICT (edge_rid) DO UPDATE SET source_node = EXCLUDED.source_node, target_node = EXCLUDED.target_node, edge_type = EXCLUDED.edge_type, status = 'APPROVED', rid_types = EXCLUDED.rid_types, updated_at = now();" | $PSQL_FED &>/dev/null
-    ok "Edge created: $NODE_SLUG polls $COORD_NAME"
-
-    # Proactively register this node profile on coordinator via handshake.
-    # This reduces first-poll 400s from missing peer public keys.
-    HANDSHAKE_PAYLOAD=$(echo "$NODE_HEALTH" | python3 -c "import sys,json; d=json.load(sys.stdin); n=d.get('node') or {}; print(json.dumps({'type':'handshake','profile':n}, separators=(',',':'))) if n else print('')" 2>/dev/null || echo "")
-    if [ -n "$HANDSHAKE_PAYLOAD" ]; then
-      info "Sending handshake to coordinator..."
-      HANDSHAKE_HTTP=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" \
-        -H "Content-Type: application/json" \
-        -X POST "$COORD_URL/koi-net/handshake" \
-        -d "$HANDSHAKE_PAYLOAD" || echo "000")
-      if [ "$HANDSHAKE_HTTP" = "200" ]; then
-        ok "Handshake accepted by coordinator (node/profile registered)"
-        COORD_HANDSHAKE_STATUS="ok"
-      else
-        warn "Coordinator handshake returned HTTP $HANDSHAKE_HTTP. They may need to upsert your node manually."
-        COORD_HANDSHAKE_STATUS="failed"
-      fi
-    else
-      warn "Could not build local node profile for coordinator handshake."
-      COORD_HANDSHAKE_STATUS="failed"
-    fi
-
-    # Check if port is open
-    if [ -n "$PUBLIC_IP" ]; then
-      info "Checking if port $API_PORT is reachable from outside..."
-      if curl -s --max-time 5 "http://$PUBLIC_IP:$API_PORT/health" &>/dev/null; then
-        ok "Port $API_PORT is open and reachable"
-      else
-        warn "Port $API_PORT may not be open. Make sure your firewall allows it:"
-        echo "     ufw allow $API_PORT/tcp"
-      fi
-    fi
-
-    FEDERATION_DONE=true
   fi
 fi
 
@@ -460,88 +444,33 @@ header "Setup Complete!"
 
 echo "Your node is running. Here's a summary:"
 echo ""
-echo "  Node name:        $NODE_FULL_NAME"
-echo "  Node type:        $NODE_TYPE"
-echo "  Database:         $DB_NAME"
-echo "  Agent directory:  $AGENT_DIR"
-echo "  Config file:      $ENV_FILE"
-echo "  systemd service:  $SERVICE_NAME"
-echo "  API (local):      http://127.0.0.1:$API_PORT"
-echo "  API bind host:    $API_BIND_HOST"
-echo "  KOI base URL:     $KOI_BASE_URL_DEFAULT"
+echo "  Node:       $NODE_FULL_NAME ($NODE_TYPE)"
+echo "  Directory:  $NODE_DIR"
+echo "  Database:   $DB_NAME"
+echo "  API:        http://127.0.0.1:$API_PORT"
+echo "  Base URL:   $KOI_BASE_URL"
 if [ -n "$NODE_RID" ]; then
-  echo "  Node RID:         $NODE_RID"
+  echo "  Node RID:   $NODE_RID"
 fi
-if [ -n "$PUBLIC_IP" ]; then
-  echo "  Public IP:        $PUBLIC_IP"
+if [ -n "${PUBLIC_IP:-}" ]; then
+  echo "  Public IP:  $PUBLIC_IP"
 fi
 echo ""
 
-if [ "${FEDERATION_DONE:-}" = "true" ]; then
-  echo -e "${GREEN}Federation (your side) is configured.${NC}"
-  if [ "${COORD_HANDSHAKE_STATUS:-}" = "ok" ]; then
-    echo "Coordinator handshake: succeeded (peer key/profile should already be registered)."
-  elif [ "${COORD_HANDSHAKE_STATUS:-}" = "failed" ]; then
-    echo "Coordinator handshake: failed (send the SQL block below to coordinator)."
-  fi
-  echo ""
-  echo "Coordinator still needs to ensure/update reciprocal edge config. Send this one-liner:"
-  echo ""
-  echo -e "${BOLD}────────────────── copy this ──────────────────${NC}"
-  echo ""
-  echo "  docker exec -i regen-koi-postgres psql -U postgres -d octo_koi <<'SQL'"
-  echo "  INSERT INTO koi_net_nodes (node_rid, node_name, node_type, base_url, public_key, status, last_seen)"
-  echo "    VALUES ('$NODE_RID', '$NODE_SLUG', 'FULL', '$NODE_BASE_URL_FOR_COORD', $NODE_PUBLIC_KEY_SQL, 'active', now())"
-  echo "    ON CONFLICT (node_rid) DO UPDATE SET"
-  echo "      node_name = EXCLUDED.node_name,"
-  echo "      node_type = EXCLUDED.node_type,"
-  echo "      base_url = EXCLUDED.base_url,"
-  echo "      public_key = COALESCE(EXCLUDED.public_key, koi_net_nodes.public_key),"
-  echo "      status = 'active',"
-  echo "      last_seen = now();"
-  echo "  INSERT INTO koi_net_edges (edge_rid, source_node, target_node, edge_type, status, rid_types)"
-  echo "    VALUES ('$EDGE_RID', '$COORD_RID', '$NODE_RID', 'POLL', 'APPROVED', '$RID_TYPES')"
-  echo "    ON CONFLICT (edge_rid) DO UPDATE SET"
-  echo "      source_node = EXCLUDED.source_node,"
-  echo "      target_node = EXCLUDED.target_node,"
-  echo "      edge_type = EXCLUDED.edge_type,"
-  echo "      status = 'APPROVED',"
-  echo "      rid_types = EXCLUDED.rid_types,"
-  echo "      updated_at = now();"
-  echo "  SQL"
-  echo ""
-  echo -e "${BOLD}────────────────────────────────────────────────${NC}"
-  echo ""
-else
-  echo "To connect to the network later, send the coordinator your:"
-  echo "  - Server IP:  ${PUBLIC_IP:-<your-ip>}"
-  echo "  - API port:   $API_PORT"
-  if [ -n "$NODE_RID" ]; then
-    echo "  - Node RID:   $NODE_RID"
-  fi
+if [ "${COORD_STATUS:-}" = "ok" ]; then
+  echo -e "${GREEN}Federation configured.${NC}"
+  echo "Send the reciprocal SQL block (printed above) to the coordinator."
   echo ""
 fi
 
+echo "Manage your node:"
+echo "  cd $OCTO_DIR/docker"
+echo "  docker compose logs -f koi-api    # watch logs"
+echo "  docker compose restart koi-api    # restart API"
+echo "  docker compose down               # stop everything"
+echo "  docker compose up -d              # start everything"
+echo ""
 echo "Next steps:"
-echo ""
-echo "  1. Edit your workspace files to add bioregional detail:"
-echo "     nano $AGENT_DIR/workspace/IDENTITY.md"
-echo "     nano $AGENT_DIR/workspace/SOUL.md"
-echo ""
-echo "  2. Add 2-3 practice vault notes:"
-echo "     nano $AGENT_DIR/vault/Practices/Your Practice.md"
-echo "     (see docs/join-the-network.md for the template)"
-echo ""
-echo "  3. Seed new vault notes into the database:"
-echo "     bash $OCTO_DIR/scripts/seed-vault-entities.sh http://127.0.0.1:$API_PORT $AGENT_DIR/vault"
-echo ""
-echo "  4. Set up OpenClaw chat agent (optional):"
-echo "     See docs/join-the-network.md → Step 10"
-echo ""
-echo "  5. Before enabling strict KOI mode:"
-echo "     Coordinate with federation peers, then set KOI_STRICT_MODE=true and restart $SERVICE_NAME"
-echo ""
-echo "Useful commands:"
-echo "  systemctl status $SERVICE_NAME    # Check service"
-echo "  journalctl -u $SERVICE_NAME -f    # View logs"
-echo "  curl http://127.0.0.1:$API_PORT/health  # Health check"
+echo "  1. Edit workspace files: nano $NODE_DIR/workspace/IDENTITY.md"
+echo "  2. Add practices: nano $NODE_DIR/vault/Practices/My Practice.md"
+echo "  3. Health check: curl http://127.0.0.1:$API_PORT/health"
