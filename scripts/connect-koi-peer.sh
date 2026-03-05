@@ -191,15 +191,22 @@ if [ "$DO_HANDSHAKE" = "true" ]; then
   info "Sending handshake to peer (register local profile/key remotely)..."
   HANDSHAKE_PAYLOAD=$(echo "$LOCAL_HEALTH" | parse_json "import sys,json; d=json.load(sys.stdin); n=d.get('node') or {}; print(json.dumps({'type':'handshake','profile':n}, separators=(',',':'))) if n else print('')" || true)
   if [ -n "$HANDSHAKE_PAYLOAD" ]; then
-    HS_CODE=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" \
+    HS_BODY=$(mktemp)
+    HS_CODE=$(curl -s --max-time 10 -o "$HS_BODY" -w "%{http_code}" \
       -H "Content-Type: application/json" \
       -X POST "$PEER_URL/koi-net/handshake" \
       -d "$HANDSHAKE_PAYLOAD" || echo "000")
     if [ "$HS_CODE" = "200" ]; then
+      EDGE_STATUS=$(cat "$HS_BODY" | parse_json "import sys,json; d=json.load(sys.stdin); print(d.get('edge_status',''))" 2>/dev/null || true)
       ok "Handshake accepted by peer"
+      if [ "$EDGE_STATUS" = "PROPOSED" ]; then
+        warn "Edge status is PROPOSED — coordinator admin must approve before polling begins."
+        warn "Ask the coordinator to run: admin-edges.sh approve <edge_rid>"
+      fi
     else
       warn "Handshake returned HTTP $HS_CODE (peer may still need manual node upsert)"
     fi
+    rm -f "$HS_BODY"
   else
     warn "Could not build handshake payload from local profile"
   fi
@@ -212,6 +219,8 @@ echo "  docker exec $CONTAINER psql -U postgres -d $DB_NAME -c \"SELECT edge_rid
 
 echo ""
 echo "Reciprocal SQL for peer admin (replace <peer_db>):"
+echo "  # NOTE: Edge is created as PROPOSED. Coordinator admin must approve it"
+echo "  # before polling begins: admin-edges.sh approve <edge_rid>"
 echo "  docker exec -i regen-koi-postgres psql -U postgres -d <peer_db> <<'SQL'"
 echo "  INSERT INTO koi_net_nodes (node_rid, node_name, node_type, base_url, public_key, status, last_seen)"
 echo "    VALUES ('$LOCAL_RID', '$LOCAL_NAME', 'FULL', '$LOCAL_BASE', $LOCAL_KEY_SQL, 'active', now())"
@@ -223,12 +232,12 @@ echo "      public_key = COALESCE(EXCLUDED.public_key, koi_net_nodes.public_key)
 echo "      status = 'active',"
 echo "      last_seen = now();"
 echo "  INSERT INTO koi_net_edges (edge_rid, source_node, target_node, edge_type, status, rid_types)"
-echo "    VALUES ('$EDGE_RID', '$LOCAL_RID', '$PEER_RID', 'POLL', 'APPROVED', '$RID_TYPES')"
+echo "    VALUES ('$EDGE_RID', '$LOCAL_RID', '$PEER_RID', 'POLL', 'PROPOSED', '$RID_TYPES')"
 echo "    ON CONFLICT (edge_rid) DO UPDATE SET"
 echo "      source_node = EXCLUDED.source_node,"
 echo "      target_node = EXCLUDED.target_node,"
 echo "      edge_type = EXCLUDED.edge_type,"
-echo "      status = 'APPROVED',"
+echo "      status = 'PROPOSED',"
 echo "      rid_types = EXCLUDED.rid_types,"
 echo "      updated_at = now();"
 echo "  SQL"

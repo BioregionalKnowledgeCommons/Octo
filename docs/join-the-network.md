@@ -975,20 +975,24 @@ INSERT INTO koi_net_nodes (node_rid, node_name, node_type, base_url, public_key,
 
 -- Create edge: your node polls Octo for practices/patterns/case studies/bioregions
 -- Edge semantics: source = data provider (Octo), target = poller (your node)
+-- Edge is created as PROPOSED. The coordinator admin must approve it
+-- before polling begins: admin-edges.sh approve <edge_rid>
 INSERT INTO koi_net_edges (edge_rid, source_node, target_node, edge_type, status, rid_types)
   VALUES ('orn:koi-net.edge:YOUR-SLUG-polls-octo-salish-sea',
           'orn:koi-net.node:octo-salish-sea+f06551d75797303be1831a1e00b41cf930625961882082346cb3932175a17716',
           'YOUR_NODE_RID',
-          'POLL', 'APPROVED', '{Practice,Pattern,CaseStudy,Bioregion}')
+          'POLL', 'PROPOSED', '{Practice,Pattern,CaseStudy,Bioregion}')
   ON CONFLICT (edge_rid) DO UPDATE SET
     source_node = EXCLUDED.source_node,
     target_node = EXCLUDED.target_node,
     edge_type = EXCLUDED.edge_type,
-    status = 'APPROVED',
+    status = 'PROPOSED',
     rid_types = EXCLUDED.rid_types,
     updated_at = now();
 SQL
 ```
+
+> **Note:** The edge starts as `PROPOSED`. After running this SQL, contact the coordinator admin to approve your edge. Polling will not begin until the edge is approved.
 
 **Then send the coordinator** your IP, port, Node RID, and public key so they can register your node on their side.
 

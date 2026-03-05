@@ -280,6 +280,11 @@ KOI_REQUIRE_SIGNED_RESPONSES=false
 KOI_ENFORCE_TARGET_MATCH=false
 KOI_ENFORCE_SOURCE_KEY_RID_BINDING=false
 
+# Leaf trust model: coordinator gates network admission; leaf trusts its coordinator.
+# Poll gating and handshake deferral are coordinator-only controls.
+KOI_NET_REQUIRE_APPROVED_EDGE_FOR_POLL=false
+KOI_NET_DEFER_UNKNOWN_HANDSHAKE=false
+
 # API
 KOI_API_HOST=0.0.0.0
 KOI_API_PORT=8351
