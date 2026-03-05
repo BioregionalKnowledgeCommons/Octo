@@ -93,10 +93,12 @@ GV's key: `/home/koi/koi-state/greater-victoria_private_key.pem` (on poly 37.27.
 ├── gv-agent/                   # Greater Victoria (LEGACY local copy — deployed on poly at /home/koi/)
 ├── koi-state/                  # Node identity keys
 │   └── octo-salish-sea_private_key.pem
-├── scripts/                    # Multi-agent management
+├── scripts/                    # Multi-agent management + federation admin
 │   ├── manage-agents.sh
 │   ├── agents.conf
-│   └── test-federation.sh
+│   ├── test-federation.sh
+│   ├── admin-edges.sh          # Edge approve/reject/list CLI (membrane governance)
+│   └── check-proposed-edges.sh # Daily cron: log pending PROPOSED edges
 ├── koi-stack/                  # Docker config
 │   ├── docker-compose.yml
 │   ├── Dockerfile.postgres-age
@@ -307,6 +309,30 @@ ssh root@45.132.245.30 "nano ~/.openclaw/workspace/KNOWLEDGE.md"
 scp workspace/KNOWLEDGE.md root@45.132.245.30:~/.openclaw/workspace/
 ```
 
+## Federation Membrane Governance
+
+The coordinator gates network admission. New nodes get PROPOSED edges (not auto-APPROVED). Admin must explicitly approve before knowledge flows.
+
+**Coordinator env vars** (in `personal.env`):
+- `KOI_NET_REQUIRE_APPROVED_EDGE_FOR_POLL=true` — gates all KOI-net data endpoints
+- `KOI_NET_DEFER_UNKNOWN_HANDSHAKE=true` — unknown handshakes create PROPOSED edges
+
+**Admin CLI** (`scripts/admin-edges.sh` on coordinator):
+```bash
+# List pending edges
+ssh root@45.132.245.30 "KOI_STATE_DIR=/root/koi-state bash /root/scripts/admin-edges.sh list --status PROPOSED"
+
+# Approve a new node
+ssh root@45.132.245.30 "KOI_STATE_DIR=/root/koi-state bash /root/scripts/admin-edges.sh approve <edge_rid>"
+
+# Reject + deactivate
+ssh root@45.132.245.30 "KOI_STATE_DIR=/root/koi-state bash /root/scripts/admin-edges.sh reject <edge_rid> --deactivate"
+```
+
+**Daily check:** Cron at 9am UTC logs PROPOSED edges to `/var/log/proposed-edges.log`.
+
+**Leaf nodes** keep `KOI_NET_REQUIRE_APPROVED_EDGE_FOR_POLL=false` and `KOI_NET_DEFER_UNKNOWN_HANDSHAKE=false` — the coordinator gates, not leaves.
+
 ## KOI-net Federation Debugging
 
 ### Fast checks
@@ -332,6 +358,8 @@ ssh root@45.132.245.30 "docker exec regen-koi-postgres psql -U postgres -d octo_
 - Poller appears "stuck" after prior peer outage:
   - Poller now uses time-based backoff (30s, 60s, 120s... capped at 600s) and should auto-recover without restart.
   - Watch for `POLL recovered for <node_rid> after <n> consecutive failures` in logs.
+- New node handshake succeeds but can't poll/fetch data:
+  - Edge is PROPOSED (membrane governance). Run `admin-edges.sh list --status PROPOSED` then `admin-edges.sh approve <edge_rid>`.
 - `404` on `/koi-net/poll`:
   - Use `/koi-net/events/poll` (legacy path removed).
 - Peer cannot reach Octo:
