@@ -532,6 +532,21 @@ else
   fi
 fi
 
+# ─── Knowledge Site (Quartz) ───
+header "Knowledge Site"
+
+echo "A Quartz knowledge site gives your node a browsable website with"
+echo "full-text search, graph view, backlinks, and an optional chat widget."
+echo ""
+read -rp "  Set up a knowledge site (Quartz)? [y/N] " setup_quartz
+if [[ "${setup_quartz,,}" =~ ^y ]]; then
+  bash "$OCTO_DIR/scripts/setup-quartz.sh" \
+    --node-name "$NODE_FULL_NAME" \
+    --node-slug "$NODE_SLUG" \
+    --node-dir "$NODE_DIR" \
+    --koi-api-port "$API_PORT"
+fi
+
 # ─── Summary ───
 header "Setup Complete!"
 

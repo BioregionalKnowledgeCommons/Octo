@@ -426,6 +426,7 @@ The remaining source files in this repo map to server paths:
 | `workspace/` | `/root/.openclaw/workspace/` |
 | `plugins/bioregional-koi/` | `/root/bioregional-koi/` |
 | `vault-seed/` | `/root/.openclaw/workspace/vault/` (subset) |
+| `quartz/` | Templates for Quartz knowledge site setup (`setup-quartz.sh`) |
 | `ontology/` | Local vault (`~/Documents/Notes/Ontology/`) |
 
 ## Related Local Projects

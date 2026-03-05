@@ -113,7 +113,29 @@ tags:
 Description of the practice. What is it? Who does it? Why does it matter?
 ```
 
-## Step 4: Federation (done by wizard)
+## Step 4: Knowledge Site (Optional, 5 min)
+
+The setup wizard offers to deploy a Quartz knowledge site — a browsable static site with full-text search, graph view, backlinks, and an optional chat widget.
+
+If you skipped it during setup, run it standalone:
+
+```bash
+bash scripts/setup-quartz.sh \
+  --node-name "Your Bioregion" \
+  --node-slug "your-bioregion" \
+  --node-dir "$HOME/your-bioregion"
+```
+
+The script handles: Quartz clone, config generation, npm install, initial build, nginx setup, optional TLS, and cron auto-rebuild (every 15 minutes).
+
+To customize, edit your vault's landing page and the generated config:
+
+```bash
+nano ~/your-node/vault/index.md           # landing page content
+nano ~/your-node-quartz/quartz.config.ts   # site title, theme, plugins
+```
+
+## Step 5: Federation (done by wizard)
 
 If you chose to federate during setup, the wizard already:
 1. Registered the coordinator (Octo) as a known peer

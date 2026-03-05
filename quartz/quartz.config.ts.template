@@ -1,0 +1,88 @@
+import { QuartzConfig } from "./quartz/cfg"
+import * as Plugin from "./quartz/plugins"
+
+const config: QuartzConfig = {
+  configuration: {
+    pageTitle: "__SITE_TITLE__",
+    pageTitleSuffix: "",
+    enableSPA: true,
+    enablePopovers: true,
+    analytics: null,
+    locale: "en-US",
+    baseUrl: "__BASE_URL__",
+    ignorePatterns: [__IGNORE_PATTERNS__],
+    defaultDateType: "modified",
+    theme: {
+      fontOrigin: "googleFonts",
+      cdnCaching: true,
+      typography: {
+        header: "Schibsted Grotesk",
+        body: "Source Sans Pro",
+        code: "IBM Plex Mono",
+      },
+      colors: {
+        lightMode: {
+          light: "#f8faf9",
+          lightgray: "#dde8e3",
+          gray: "#8aa89a",
+          darkgray: "#3a4f45",
+          dark: "#1a2e24",
+          secondary: "#1e6b4e",
+          tertiary: "#48a882",
+          highlight: "rgba(72, 168, 130, 0.12)",
+          textHighlight: "#48a88244",
+        },
+        darkMode: {
+          light: "#0e1a15",
+          lightgray: "#1e2e26",
+          gray: "#5a7a6a",
+          darkgray: "#c8ddd2",
+          dark: "#e8f0ec",
+          secondary: "#48a882",
+          tertiary: "#6bc4a0",
+          highlight: "rgba(72, 168, 130, 0.15)",
+          textHighlight: "#48a88244",
+        },
+      },
+    },
+  },
+  plugins: {
+    transformers: [
+      Plugin.FrontMatter(),
+      Plugin.CreatedModifiedDate({
+        priority: ["frontmatter", "filesystem"],
+      }),
+      Plugin.SyntaxHighlighting({
+        theme: {
+          light: "github-light",
+          dark: "github-dark",
+        },
+        keepBackground: false,
+      }),
+      Plugin.ObsidianFlavoredMarkdown({ enableInHtmlEmbed: false }),
+      Plugin.GitHubFlavoredMarkdown(),
+      Plugin.TableOfContents(),
+      Plugin.CrawlLinks({ markdownLinkResolution: "shortest" }),
+      Plugin.Description(),
+      Plugin.Latex({ renderEngine: "katex" }),
+    ],
+    filters: [Plugin.RemoveDrafts()],
+    emitters: [
+      Plugin.AliasRedirects(),
+      Plugin.ComponentResources(),
+      Plugin.ContentPage(),
+      Plugin.FolderPage(),
+      Plugin.TagPage(),
+      Plugin.ContentIndex({
+        enableSiteMap: true,
+        enableRSS: true,
+      }),
+      Plugin.Assets(),
+      Plugin.Static(),
+      Plugin.Favicon(),
+      Plugin.NotFoundPage(),
+    ],
+  },
+}
+
+export default config

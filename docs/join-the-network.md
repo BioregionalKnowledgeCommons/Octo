@@ -1079,14 +1079,47 @@ bash ~/scripts/seed-vault-entities.sh http://127.0.0.1:8351 ~/your-agent/vault
 
 ### Quartz knowledge site (optional)
 
-Publish your vault as a browsable website with wikilinks, backlinks, and a knowledge graph visualization. See the [Quartz documentation](https://quartz.jzhao.xyz/) and Octo's `octo-quartz/` directory for the reference setup.
+Publish your vault as a browsable website with wikilinks, backlinks, graph view, full-text search, and an optional chat widget.
 
-Key steps:
-1. Install Quartz: `git clone https://github.com/jackyzha0/quartz.git`
-2. Symlink your vault as content: `ln -s ~/your-agent/vault content`
-3. Configure `quartz.config.ts` (title, theme, plugins)
-4. Build: `npx quartz build`
-5. Serve with nginx
+**Automated setup (recommended):**
+
+```bash
+# If you used setup-node.sh, it offered Quartz at the end.
+# Otherwise, run the standalone script:
+bash scripts/setup-quartz.sh \
+  --node-name "Your Bioregion" \
+  --node-slug "your-bioregion" \
+  --node-dir "$HOME/your-bioregion"
+```
+
+The script handles everything: cloning Quartz at the pinned version, generating config from templates, symlinking your vault, npm install, initial build, nginx setup (HTTP + optional TLS), and cron auto-rebuild every 15 minutes.
+
+**What you get:**
+- Static site generated from your vault's Markdown files
+- Full-text search via Quartz content index
+- Interactive graph view showing entity relationships
+- Backlinks panel on every page
+- Optional chat widget (connects to your node's chat backend)
+- Auto-rebuild every 15 minutes picks up vault changes
+
+**Customization:**
+
+```bash
+nano ~/your-node/vault/index.md              # landing page
+nano ~/your-node-quartz/quartz.config.ts     # title, theme, plugins
+```
+
+**Manual rebuild:**
+
+```bash
+bash ~/your-node-quartz/rebuild.sh
+```
+
+**Updating Quartz version:**
+
+The pinned version is in `quartz/QUARTZ_VERSION`. To upgrade, pull the latest Octo repo and re-run the setup script — it updates in place (idempotent).
+
+See the [Quartz documentation](https://quartz.jzhao.xyz/) for advanced theme and plugin customization.
 
 ### Monitoring and backups
 

@@ -1,0 +1,61 @@
+#!/bin/bash
+set -euo pipefail
+
+QUARTZ_DIR="__QUARTZ_DIR__"
+LOCK_FILE="$QUARTZ_DIR/.locks/rebuild.lock"
+
+# Prevent concurrent rebuilds
+exec 200>"$LOCK_FILE"
+if ! flock -n 200; then
+  echo "Another rebuild is already running (lock: $LOCK_FILE)"
+  exit 0
+fi
+
+cd "$QUARTZ_DIR"
+
+# Keep last good output so bad content never takes the site down.
+if [ -d public ]; then
+  rm -rf public.prev
+  cp -a public public.prev
+fi
+
+# Graph data generation (optional — only if graph-data.cjs exists)
+if [ -f graph-data.cjs ]; then
+  echo "Generating graph data..."
+  if node graph-data.cjs > quartz/static/graph-data.json 2>/dev/null; then
+    echo "Graph data generated"
+  else
+    echo "Graph data generation failed (DB may be unavailable)"
+  fi
+fi
+
+echo "Building Quartz..."
+if ! npx quartz build; then
+  echo "Quartz build failed"
+  if [ -d public.prev ]; then
+    rm -rf public
+    mv public.prev public
+    echo "Restored previous public snapshot"
+  fi
+  exit 1
+fi
+
+# Copy graph data into public if it was generated
+if [ -f quartz/static/graph-data.json ]; then
+  mkdir -p public/static
+  cp quartz/static/graph-data.json public/static/graph-data.json 2>/dev/null || true
+fi
+
+# Chat widget injection (conditional)
+if [ "__CHAT_WIDGET_ENABLED__" = "true" ] && [ -f public/static/chat-widget.js ]; then
+  find public -name '*.html' -print0 | while IFS= read -r -d '' f; do
+    if ! grep -q 'chat-widget.js' "$f"; then
+      sed -i 's|</body>|<script src="/static/chat-widget.js" defer></script></body>|' "$f"
+    fi
+  done
+  echo "Chat widget injected"
+fi
+
+rm -rf public.prev
+
+echo "Rebuild complete at $(date)"
