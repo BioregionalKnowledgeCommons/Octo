@@ -25,7 +25,7 @@ This contract specifies how a Clawsmos Summarizer agent calls BKC's `/ingest` en
 
 ### Production (Salish Sea / Octo node)
 ```
-POST https://45.132.245.30.sslip.io/commons/api/nodes/octo-salish-sea/ingest
+POST https://salishsee.life/commons/api/nodes/octo-salish-sea/ingest
 ```
 
 ### For local testing (if running web dashboard locally)
@@ -35,7 +35,7 @@ POST http://localhost:3000/commons/api/nodes/octo-salish-sea/ingest
 
 ### Direct to KOI backend (bypasses BFF — emergency fallback only)
 ```
-POST http://45.132.245.30:8351/ingest
+POST http://127.0.0.1:8351/ingest
 ```
 *(Note: direct path skips the BFF auth token; the KOI API itself has no external auth gate —
 only use this in a controlled SSH tunnel scenario.)*
@@ -177,7 +177,7 @@ x-ingest-token: <token>
 ## 6. Sample Call (Success)
 
 ```bash
-curl -X POST https://45.132.245.30.sslip.io/commons/api/nodes/octo-salish-sea/ingest \
+curl -X POST https://salishsee.life/commons/api/nodes/octo-salish-sea/ingest \
   -H "Content-Type: application/json" \
   -H "x-ingest-token: <token>" \
   -d '{
@@ -221,7 +221,7 @@ curl -X POST https://45.132.245.30.sslip.io/commons/api/nodes/octo-salish-sea/in
 ## 7. Sample Call (Failure — wrong token)
 
 ```bash
-curl -X POST https://45.132.245.30.sslip.io/commons/api/nodes/octo-salish-sea/ingest \
+curl -X POST https://salishsee.life/commons/api/nodes/octo-salish-sea/ingest \
   -H "Content-Type: application/json" \
   -H "x-ingest-token: wrong-token" \
   -d '{"source": "test", "entities": [], "document_rid": "test:001"}'

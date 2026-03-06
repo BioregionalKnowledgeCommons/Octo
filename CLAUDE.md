@@ -147,8 +147,8 @@ GV's key: `/home/koi/koi-state/greater-victoria_private_key.pem` (on poly 37.27.
 
 ## Quartz Knowledge Site — "Salish Sea Knowledge Garden"
 
-**Canonical URL:** `https://45.132.245.30.sslip.io`
-**Legacy URL:** `http://45.132.245.30`
+**Canonical URL:** `https://salishsee.life`
+**Legacy URLs:** `https://45.132.245.30.sslip.io`, `http://45.132.245.30`
 
 Quartz renders Octo's vault as a browsable static site with wikilinks, backlinks, graph view, and full-text search.
 

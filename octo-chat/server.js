@@ -132,7 +132,7 @@ const server = http.createServer((req, res) => {
           "--session-id", sid,
           "--message", cleanMessage,
           "--json"
-        ], { timeout: 120000 }, (err, stdout, stderr) => {
+        ], { timeout: 30000 }, (err, stdout, stderr) => {
           if (err) {
             const userMessage = classifyError(err);
             console.error("Agent error:", err.message, stderr ? `stderr: ${stderr}` : "");

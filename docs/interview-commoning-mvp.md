@@ -85,6 +85,27 @@ Default policy:
 
 This creates a federated derived-artifact layer without assuming raw interview material should cross boundaries.
 
+### Consent Tier Enforcement
+
+Consent tiers are enforced at the database level, not by policy alone:
+
+| Consent tier | `visibility_scope` | `node_private` | Public API | Federation | Quartz site |
+|---|---|---|---|---|---|
+| `public` | `public` | `false` | Visible | Eligible (gets `koi_rid`) | Published |
+| `restricted` | `public` | `false` | Visible | Eligible | Published |
+| `community_only` | `node_private` | `true` | Hidden | Blocked (no `koi_rid`) | Workspace only |
+| `private` | `node_private` | `true` | Hidden | Blocked | Workspace only |
+
+When `community_only` is set:
+
+- The plugin passes `visibility_scope: "node_private"` to `/register-entity`
+- The backend sets `node_private = true` on the entity in `entity_registry`
+- All public query endpoints (`/entity-search`, `/chat`, `/entities`, `/stats`, GraphRAG) filter out `node_private` entities
+- No `koi_rid` is assigned, so the entity never enters federation
+- Vault notes are written to the workspace directory (not the Quartz-published vault)
+
+The `node_private` flag is recomputed whenever `/register-entity` is called. If the same entity has both a `public` and a `node_private` mapping (merge case), public wins — the entity remains visible.
+
 ## Artifact Layout
 
 ### Workspace
