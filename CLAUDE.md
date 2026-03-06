@@ -371,7 +371,7 @@ Octo's databases are in the local PostgreSQL container (`regen-koi-postgres`). G
 
 | Database | Agent | Host | Entities |
 |----------|-------|------|----------|
-| `octo_koi` | Octo (Salish Sea) | `45.132.245.30` (local) | 70 |
+| `octo_koi` | Octo (Salish Sea) | `45.132.245.30` (local) | ~1,005 |
 | `fr_koi` | Front Range | `45.132.245.30` (local) | 4 |
 | `gv_koi` | Greater Victoria | `37.27.48.12` (poly, port 5433) | 5 |
 
@@ -383,6 +383,13 @@ Octo's databases are in the local PostgreSQL container (`regen-koi-postgres`). G
 - `pending_relationships` — Unresolved relationship targets
 - `document_entity_links` — Document↔entity mention tracking
 - `web_submissions` — URL submission lifecycle (preview → evaluate → ingest)
+
+### MediaWiki import tables (migration 063)
+
+- `mediawiki_wikis` — Wiki registry (base_url, API endpoint, sync mode)
+- `mediawiki_page_state` — Per-page state tracking with classification, confidence scores, and entity URIs
+- `mediawiki_import_runs` — Import run tracking (pilot/full/rerun, page counts, entity/edge stats)
+- `mediawiki_page_links` — Source-native page links with provenance (separate from promoted `entity_relationships`)
 
 ### Federation tables (KOI-net, per database)
 
@@ -468,8 +475,8 @@ The remaining source files in this repo map to server paths:
 
 ## Current Status
 
-**Date:** 2026-03-05
-**Status:** HEALTHY — vault auto-note creation live, 3-node federation active
+**Date:** 2026-03-06
+**Status:** HEALTHY — MediaWiki import pilot deployed (~1,005 entities), 3-node federation active
 
 ### What's Done
 - Sprints 1-3 deployed: KOI-net federation working between Octo (coordinator) and GV (leaf)
@@ -477,7 +484,7 @@ The remaining source files in this repo map to server paths:
 - P0-P9 protocol alignment complete (98 tests, deployed), keys encrypted at rest (P9)
 - **Front Range agent deployed** (2026-02-19): `127.0.0.1:8355` on Octo server, `fr_koi` DB, bidirectional federation with Octo, localhost-only (peer through coordinator topology). Code path: `/root/fr-koi-processor/`
 - Node RID migration to b64_64 (BlockScience canonical) complete
-- 70 entities in Octo across 14 types, seeded via `seed-vault-entities.sh`
+- **~1,005 entities** in Octo (was 70 pre-import) — MediaWiki import pilot added ~935 new entities
 - Cowichan Valley (Shawn's node) live at `202.61.242.194:8351`
 - **Phase 5.7: GitHub sensor activated** (2026-02-19): 4 repos, 35k+ code artifacts, tree-sitter extraction, 6-hour auto-scan interval
 - **Commons intake workflow deployed** (2026-02-26, commit `1bb24b50`):
@@ -489,6 +496,7 @@ The remaining source files in this repo map to server paths:
 - **Octo RID rotated** (2026-02-26): New RID `...+f06551d7...`; FR RID reconciliation done (234 cross-refs updated)
 - **Web dashboard deployed** with commons merge review UI, chat, entity browser, knowledge panel
 - **Vault auto-note creation (2026-03-05, pin `a54b626e`)**: `POST /web/ingest` now creates `.md` vault notes automatically for new entities. Direction-aware wikilinks, `entity_rid_mappings` upsert with collision guard. Backfilled 16 existing web_ingest entities. salishsee.life pages verified 200 ✓
+- **MediaWiki import v1 (2026-03-06)**: Salish Sea Wiki (salishsearestoration.org) graph densification pipeline. Parser (`api/mediawiki_parser.py`), dump reader, bulk importer, migration 063. Pilot: 50 pages → 319 entities created, 13 matched, 565 edges promoted. Entity count grew from ~70 to ~1,005. Three confidence tiers (0.95/0.85/0.7) + editorial (0.6). Template→BKC type mapping (Topic→Concept, Effort→Project, Workgroup→Organization, Place→Location). Idempotent, batched transactions, high-degree quarantine.
 
 ### GV Remote Node (poly)
 - **Host:** `37.27.48.12` (poly server, shared with AlgoTrading)
@@ -558,3 +566,4 @@ curl -s http://127.0.0.1:8354/health
 | `eaecf381` | 2026-02-26 | Accelerated Rollout | Early soak close; FR canary/e2e PASS; FR + Octo convergence deploys; GV deferred on `/health`. |
 | `45c44f93` | 2026-02-26 | Commons Intake Deploy | Full commons intake to all 3 nodes (migrations 053-054, async worker, merge review); GV `/health` resolved; Octo RID rotated; FR RID reconciliation; web dashboard deployed. |
 | `a56e7930` | 2026-03-05 | Vault Auto-Notes | Auto-create vault .md notes during web ingest. `vault_note_utils.py`, `backfill_vault_notes.py`, web_router.py updated. Backfilled 16 entities. All 3 nodes deployed (pin `a54b626e`). |
+| `0d84c823` | 2026-03-06 | MediaWiki Import v1 | Salish Sea Wiki graph densification: parser, dump reader, bulk importer, migration 063. Pilot 50 pages → 319 entities created, 565 edges. Entity count 70→~1,005. Three confidence tiers + editorial edges. Deployed to Octo production. |
