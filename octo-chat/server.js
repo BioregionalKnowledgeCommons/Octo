@@ -132,12 +132,11 @@ const server = http.createServer((req, res) => {
           "--session-id", sid,
           "--message", cleanMessage,
           "--json"
-        ], { timeout: 30000 }, (err, stdout, stderr) => {
+        ], { timeout: 20000 }, (err, stdout, stderr) => {
           if (err) {
-            const userMessage = classifyError(err);
-            console.error("Agent error:", err.message, stderr ? `stderr: ${stderr}` : "");
+            console.error("Agent error:", err.message);
 
-            // Fallback to KOI /chat for degraded RAG response
+            // Fallback to KOI /chat RAG — fast and has full knowledge graph
             koiChatFallback(cleanMessage, (fallbackErr, fallbackAnswer) => {
               if (!fallbackErr && fallbackAnswer) {
                 console.log("Served response via KOI /chat fallback");
