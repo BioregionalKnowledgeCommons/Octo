@@ -242,6 +242,7 @@ header "Setting Up Node"
 # 1. Create node directory
 info "Creating $NODE_DIR..."
 mkdir -p "$NODE_DIR"/{vault,koi-state,workspace}
+mkdir -p "$NODE_DIR"/workspace/{interviews/intake,interviews/transcripts,interviews/review,interviews/publication,protocol-library}
 mkdir -p "$NODE_DIR"/vault/{Bioregions,Practices,Patterns,Organizations,Projects,Concepts,People,Locations,CaseStudies,Protocols,Playbooks,Questions,Claims,Evidence,Sources}
 ok "Directory created"
 
@@ -522,7 +523,7 @@ else
         --local-url "http://127.0.0.1:$API_PORT" \
         --peer-url "$COORD_URL" \
         --container "regen-koi-postgres" \
-        --rid-types "{Practice,Pattern,CaseStudy,Bioregion,Organization,Project,Concept}"; then
+        --rid-types "{Practice,Pattern,Protocol,CaseStudy,Bioregion,Organization,Project,Concept}"; then
       COORD_STATUS="ok"
     else
       warn "Federation had issues. Retry later:"

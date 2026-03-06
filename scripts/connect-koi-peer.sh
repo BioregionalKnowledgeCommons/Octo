@@ -37,7 +37,7 @@ Required:
 Optional:
   --local-url <url>      Local KOI API URL (default: http://127.0.0.1:8351)
   --edge-rid <rid>       Override edge RID (default: orn:koi-net.edge:<local>-polls-<peer>)
-  --rid-types <array>    PostgreSQL text[] literal (default: {Practice,Pattern,CaseStudy,Bioregion})
+  --rid-types <array>    PostgreSQL text[] literal (default: {Practice,Pattern,Protocol,CaseStudy,Bioregion})
   --container <name>     Postgres container name (default: regen-koi-postgres)
   --api-container <name> KOI API container name for python3 fallback (default: koi-api)
   --no-handshake         Skip sending handshake to peer
@@ -74,7 +74,7 @@ DB_NAME=""
 PEER_URL=""
 LOCAL_URL="http://127.0.0.1:8351"
 EDGE_RID=""
-RID_TYPES="{Practice,Pattern,CaseStudy,Bioregion}"
+RID_TYPES="{Practice,Pattern,Protocol,CaseStudy,Bioregion}"
 CONTAINER="regen-koi-postgres"
 API_CONTAINER="koi-api"
 DO_HANDSHAKE="true"

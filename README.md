@@ -12,6 +12,7 @@ Octo is also a **KOI-net federation coordinator** — it aggregates knowledge fr
 - **Discourse Graph**: Manages questions, claims, and evidence with typed relationships (supports, opposes, informs) — enabling progressive formalization of bioregional knowledge
 - **Entity Resolution**: Multi-tier entity resolution (exact → fuzzy → semantic → create) with OpenAI embeddings and pgvector
 - **Web Content Curation**: Users share URLs via Telegram/Discord, Octo previews (with Playwright for JS-rendered sites), evaluates bioregional relevance, and ingests into the knowledge graph with entity linking
+- **Interview Commoning**: Captures local interviews, extracts practices/patterns/protocols, and publishes only approved derived artifacts into the federated commons
 - **Vault Integration**: Bidirectional linking between an Obsidian-style vault and a PostgreSQL knowledge graph
 - **KOI-net Federation**: Authenticated event-driven protocol for cross-bioregional knowledge sharing with ECDSA-signed envelopes, background polling, and cross-reference resolution
 
@@ -139,7 +140,8 @@ See [ontology/bkc-ontology.jsonld](ontology/bkc-ontology.jsonld) for the formal 
 ├── gv-agent/               # Greater Victoria leaf node config
 ├── fr-agent/               # Front Range peer node config
 ├── plugins/
-│   └── bioregional-koi/    # OpenClaw plugin connecting to KOI API
+│   ├── bioregional-koi/    # OpenClaw plugin connecting to KOI API
+│   └── interview-commoning/ # Local interview-to-pattern workflow plugin
 ├── ontology/               # Formal BKC ontology (JSON-LD)
 │   └── bkc-ontology.jsonld
 ├── vault-seed/             # Seed entity notes exercising the full predicate chain

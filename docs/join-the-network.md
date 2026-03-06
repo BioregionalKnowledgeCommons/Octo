@@ -542,6 +542,14 @@ cp /root/Octo/plugins/bioregional-koi/openclaw.plugin.json /root/bioregional-koi
 cp /root/Octo/plugins/bioregional-koi/index.ts /root/bioregional-koi/
 ```
 
+Optional: install the interview-commoning plugin if this node will run local interview intake and derived-artifact publication:
+
+```bash
+mkdir -p /root/interview-commoning
+cp /root/Octo/plugins/interview-commoning/openclaw.plugin.json /root/interview-commoning/
+cp /root/Octo/plugins/interview-commoning/index.ts /root/interview-commoning/
+```
+
 Start the agent:
 
 ```bash
@@ -802,6 +810,14 @@ cp ~/Octo/plugins/bioregional-koi/openclaw.plugin.json ~/bioregional-koi/
 cp ~/Octo/plugins/bioregional-koi/index.ts ~/bioregional-koi/
 ```
 
+Optional local workflow plugin:
+
+```bash
+mkdir -p ~/interview-commoning
+cp ~/Octo/plugins/interview-commoning/openclaw.plugin.json ~/interview-commoning/
+cp ~/Octo/plugins/interview-commoning/index.ts ~/interview-commoning/
+```
+
 The plugin gives your OpenClaw agent these tools:
 - `koi_search` — search the entity registry
 - `knowledge_search` — RAG over indexed documents
@@ -973,7 +989,7 @@ INSERT INTO koi_net_nodes (node_rid, node_name, node_type, base_url, public_key,
     status = 'active',
     last_seen = now();
 
--- Create edge: your node polls Octo for practices/patterns/case studies/bioregions
+-- Create edge: your node polls Octo for practices/patterns/protocols/case studies/bioregions
 -- Edge semantics: source = data provider (Octo), target = poller (your node)
 -- Edge is created as PROPOSED. The coordinator admin must approve it
 -- before polling begins: admin-edges.sh approve <edge_rid>
@@ -981,7 +997,7 @@ INSERT INTO koi_net_edges (edge_rid, source_node, target_node, edge_type, status
   VALUES ('orn:koi-net.edge:YOUR-SLUG-polls-octo-salish-sea',
           'orn:koi-net.node:octo-salish-sea+f06551d75797303be1831a1e00b41cf930625961882082346cb3932175a17716',
           'YOUR_NODE_RID',
-          'POLL', 'PROPOSED', '{Practice,Pattern,CaseStudy,Bioregion}')
+          'POLL', 'PROPOSED', '{Practice,Pattern,Protocol,CaseStudy,Bioregion}')
   ON CONFLICT (edge_rid) DO UPDATE SET
     source_node = EXCLUDED.source_node,
     target_node = EXCLUDED.target_node,
