@@ -468,8 +468,8 @@ The remaining source files in this repo map to server paths:
 
 ## Current Status
 
-**Date:** 2026-02-26
-**Status:** HEALTHY — 3-node commons-capable federation active
+**Date:** 2026-03-05
+**Status:** HEALTHY — vault auto-note creation live, 3-node federation active
 
 ### What's Done
 - Sprints 1-3 deployed: KOI-net federation working between Octo (coordinator) and GV (leaf)
@@ -488,6 +488,7 @@ The remaining source files in this repo map to server paths:
   - E2E verified: `staged → approved → ingesting → ingested`
 - **Octo RID rotated** (2026-02-26): New RID `...+f06551d7...`; FR RID reconciliation done (234 cross-refs updated)
 - **Web dashboard deployed** with commons merge review UI, chat, entity browser, knowledge panel
+- **Vault auto-note creation (2026-03-05, pin `a54b626e`)**: `POST /web/ingest` now creates `.md` vault notes automatically for new entities. Direction-aware wikilinks, `entity_rid_mappings` upsert with collision guard. Backfilled 16 existing web_ingest entities. salishsee.life pages verified 200 ✓
 
 ### GV Remote Node (poly)
 - **Host:** `37.27.48.12` (poly server, shared with AlgoTrading)
@@ -504,8 +505,10 @@ The remaining source files in this repo map to server paths:
 - **Backups:** `gv-backup.timer` (daily 3am), `gv-backup-offhost.timer` (weekly Sun 4am → Octo). See Backups section.
 
 ### What's Left
-1. **Phase 0.5: BKC CoIP vault audit** — blocked on access from Andrea Farias / Vincent Arena
-2. **Phase 5: Cascadia coordinator** — after CV is running, proves holon pattern
+1. **B5 eval gates**: Stratified BKC eval dataset (28 queries), baseline metrics — quality floor before GraphRAG
+2. **B2 GraphRAG v1**: Community-aware retrieval via Leiden clustering + centrality, behind `GRAPHRAG_ENABLED` flag
+3. **B4 TBFF flow integration**: Receipt→Evidence write-back loop, threshold policy
+4. **S1 data classification matrix**: Security lane before scaling ingest (unblocked by S0 membrane)
 
 ### New Node Onboarding (External — Fresh VPS)
 
@@ -554,3 +557,4 @@ curl -s http://127.0.0.1:8354/health
 | `de8dd498` | 2026-02-25/26 | Convergence | KOI Runtime Convergence Plan: Phase 0 audit, Phase 0.5 contracts, Phase 1-2 implementation, Phase 3-5 scaffolding. |
 | `eaecf381` | 2026-02-26 | Accelerated Rollout | Early soak close; FR canary/e2e PASS; FR + Octo convergence deploys; GV deferred on `/health`. |
 | `45c44f93` | 2026-02-26 | Commons Intake Deploy | Full commons intake to all 3 nodes (migrations 053-054, async worker, merge review); GV `/health` resolved; Octo RID rotated; FR RID reconciliation; web dashboard deployed. |
+| `a56e7930` | 2026-03-05 | Vault Auto-Notes | Auto-create vault .md notes during web ingest. `vault_note_utils.py`, `backfill_vault_notes.py`, web_router.py updated. Backfilled 16 entities. All 3 nodes deployed (pin `a54b626e`). |
