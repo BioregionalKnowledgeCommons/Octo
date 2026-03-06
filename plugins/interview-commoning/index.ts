@@ -6,7 +6,8 @@ import * as nodePath from "node:path";
 import * as os from "node:os";
 
 const OPENAI_API = "https://api.openai.com/v1/chat/completions";
-const KOI_API = process.env.KOI_API_ENDPOINT || "http://127.0.0.1:8351";
+const KOI_API = process.env.KOI_API_ENDPOINT
+  ?? `http://127.0.0.1:${process.env.KOI_API_PORT ?? "8351"}`;
 const DEFAULT_MODEL = process.env.INTERVIEW_COMMONING_MODEL || process.env.GPT_MODEL || "gpt-4o-mini";
 
 type JsonMap = Record<string, any>;
@@ -269,8 +270,19 @@ function noteFolderForType(type: string): string {
   return map[type] || "Concepts";
 }
 
-function vaultRidFor(type: string, title: string): string {
-  return `orn:openclaw.entity:${noteFolderForType(type)}/${slugify(title)}`;
+function vaultRidFor(type: string, title: string, bioregion?: string): string {
+  const folder = noteFolderForType(type);
+  const titleSlug = slugify(title);
+  if (bioregion) {
+    return `orn:openclaw.entity:${folder}/${slugify(bioregion)}--${titleSlug}`;
+  }
+  return `orn:openclaw.entity:${folder}/${titleSlug}`;
+}
+
+function noteNameWithOrigin(title: string, bioregion?: string): string {
+  const base = noteName(title);
+  if (bioregion) return `${noteName(bioregion)} — ${base}`;
+  return base;
 }
 
 async function koiRequest(path: string, method = "GET", body?: unknown) {
@@ -399,6 +411,57 @@ function recommendedSharePolicy(sensitivity: string): string {
   return "local_only";
 }
 
+type PublishViolation = { packetId: string; reason: string };
+type PublicationScope = "vault_only" | "local_graph" | "federated";
+
+function derivePublicationScope(intake: IntakeRecord): PublicationScope {
+  if (intake.consent_tier === "private" || intake.consent_tier === "restricted") {
+    return "vault_only";
+  }
+  if (intake.consent_tier === "community_only") {
+    return "local_graph";
+  }
+  if (intake.share_scope === "cross_bioregion") {
+    return "federated";
+  }
+  return "local_graph";
+}
+
+function isQuartzVisible(intake: IntakeRecord): boolean {
+  return intake.consent_tier !== "private"
+      && intake.consent_tier !== "restricted"
+      && intake.consent_tier !== "community_only";
+}
+
+function deriveVisibilityScope(intake: IntakeRecord): "public" | "node_private" {
+  return intake.consent_tier === "community_only" ? "node_private" : "public";
+}
+
+function evaluatePublishConsent(
+  intake: IntakeRecord,
+  publishCandidates: ReviewPacket[],
+): PublishViolation[] {
+  const violations: PublishViolation[] = [];
+
+  if (intake.consent_tier === "community_only" && intake.share_scope === "cross_bioregion") {
+    for (const p of publishCandidates) {
+      violations.push({ packetId: p.packet_id, reason: "consent_tier is community_only — cross-bioregion federation not authorized" });
+    }
+    return violations;
+  }
+
+  for (const p of publishCandidates) {
+    if (intake.share_scope === "local" && p.share_policy !== "local_only") {
+      violations.push({ packetId: p.packet_id, reason: "share_scope is local — cross-node sharing blocked" });
+    }
+    if (intake.share_scope === "bioregion" && p.share_policy === "federated_derived") {
+      violations.push({ packetId: p.packet_id, reason: "share_scope is bioregion — cross-bioregion federation blocked" });
+    }
+  }
+
+  return violations;
+}
+
 function extractBundleToPackets(interviewId: string, intake: IntakeRecord, extracted: JsonMap) {
   const practices = Array.isArray(extracted.practices) ? extracted.practices : [];
   const patterns = Array.isArray(extracted.patterns) ? extracted.patterns : [];
@@ -496,7 +559,14 @@ function extractBundleToPackets(interviewId: string, intake: IntakeRecord, extra
   };
 }
 
-function packetBody(packet: ReviewPacket, intake: IntakeRecord, extra: { about?: string[]; documents?: string[] } = {}): { frontmatter: JsonMap; content: string } {
+function packetBody(
+  packet: ReviewPacket, intake: IntakeRecord,
+  extra: {
+    about?: string[]; documents?: string[];
+    derivedFromCaseStudyRids?: string[];
+    derivedFromPatternRids?: string[];
+  } = {},
+): { frontmatter: JsonMap; content: string } {
   const tagBase = packet.packet_type
     .replace(/CandidatePacket$/, "")
     .replace(/Packet$/, "")
@@ -512,8 +582,8 @@ function packetBody(packet: ReviewPacket, intake: IntakeRecord, extra: { about?:
     shareScope: packet.share_policy,
     requestAccessVia: intake.steward || intake.node_id,
     reviewedBy: packet.review?.reviewer || "",
-    derivedFromPracticeIds: packet.derived_from_practice_ids || [],
-    derivedFromPatternIds: packet.derived_from_pattern_ids || [],
+    derivedFromCaseStudyRids: extra.derivedFromCaseStudyRids || [],
+    derivedFromPatternRids: extra.derivedFromPatternRids || [],
     tags,
   };
   if (extra.about && extra.about.length > 0) frontmatter.about = extra.about;
@@ -540,28 +610,45 @@ function packetBody(packet: ReviewPacket, intake: IntakeRecord, extra: { about?:
   return { frontmatter, content };
 }
 
-async function writeNoteIfMissing(type: string, title: string, content: string): Promise<{ path: string; created: boolean }> {
-  const relativePath = `${noteFolderForType(type)}/${noteName(title)}.md`;
-  const fullPath = safeVaultPath(relativePath);
+async function writeOrUpdateNote(
+  type: string, title: string, content: string,
+  bioregion?: string, vaultOnly?: boolean,
+): Promise<{ path: string; created: boolean; updated: boolean }> {
+  const fileName = noteNameWithOrigin(title, bioregion);
+  const relativePath = vaultOnly
+    ? `interviews/published-notes/${noteFolderForType(type)}/${fileName}.md`
+    : `${noteFolderForType(type)}/${fileName}.md`;
+  const fullPath = vaultOnly
+    ? safeWorkspacePath(relativePath)
+    : safeVaultPath(relativePath);
   await fs.mkdir(nodePath.dirname(fullPath), { recursive: true });
   try {
-    await fs.access(fullPath);
-    return { path: relativePath, created: false };
+    const existing = await fs.readFile(fullPath, "utf-8");
+    if (existing === content) return { path: relativePath, created: false, updated: false };
+    await fs.writeFile(fullPath, content, "utf-8");
+    return { path: relativePath, created: false, updated: true };
   } catch {
     await fs.writeFile(fullPath, content, "utf-8");
-    return { path: relativePath, created: true };
+    return { path: relativePath, created: true, updated: false };
   }
 }
 
-async function registerNote(type: string, title: string, relativePath: string, frontmatter: JsonMap, content: string) {
+async function registerNote(
+  type: string, title: string, relativePath: string,
+  frontmatter: JsonMap, content: string,
+  bioregion?: string, publicationScope?: string,
+  visibilityScope?: string,
+) {
   return koiRequest("/register-entity", "POST", {
-    vault_rid: vaultRidFor(type, title),
+    vault_rid: vaultRidFor(type, title, bioregion),
     vault_path: relativePath,
     entity_type: type,
     name: title,
     properties: {},
     frontmatter,
     content_hash: sha256(content),
+    publication_scope: publicationScope || "local_graph",
+    visibility_scope: visibilityScope || "public",
   });
 }
 
@@ -961,20 +1048,9 @@ const interviewCommoningPlugin = {
               throw new Error("No approved shared packets found. Approve at least one pattern, protocol, or shared_summary practice first.");
             }
 
-            const entities: Array<{ name: string; type: string; context?: string; confidence?: number }> = [];
-            const relationships: Array<{ subject: string; predicate: string; object: string; confidence?: number }> = [];
-            const entityKey = new Set<string>();
-            const addEntity = (name: string, type: string, context?: string) => {
-              const key = `${type}:${name}`;
-              if (entityKey.has(key)) return;
-              entityKey.add(key);
-              entities.push({ name, type, context, confidence: 0.95 });
-            };
-
-            addEntity(intake.bioregion, "Bioregion", `Source bioregion for ${interviewId}`);
-            for (const packet of [...sharedPatterns, ...sharedProtocols]) {
-              addEntity(packet.title, packetTypeToEntityType(packet.packet_type), packet.summary);
-            }
+            // Derive publication scope and visibility from consent model
+            const scope = derivePublicationScope(intake);
+            const quartzVisible = isQuartzVisible(intake);
 
             const publicPatternByPracticeId = new Map<string, string[]>();
             for (const pattern of sharedPatterns) {
@@ -1009,27 +1085,67 @@ const interviewCommoningPlugin = {
               linked_protocol_titles: publicProtocolByPracticeId.get(practice.packet_id) || [],
             }));
 
+            // Auto-coerce share_policy to match derived scope
+            const allPublishCandidates = [...sharedPatterns, ...sharedProtocols, ...caseStudyPackets];
+            for (const p of allPublishCandidates) {
+              if (scope === "vault_only") {
+                p.share_policy = "local_only";
+              } else if (scope === "local_graph") {
+                if (p.share_policy === "federated_derived") {
+                  p.share_policy = intake.share_scope === "local" ? "local_only" : "shared_within_bioregion";
+                }
+              }
+            }
+
+            // Hard consent gate
+            const violations = evaluatePublishConsent(intake, allPublishCandidates);
+            if (violations.length > 0) {
+              throw new Error(
+                `Consent gate blocked publication:\n${violations.map((v) => `  - ${v.packetId}: ${v.reason}`).join("\n")}`
+              );
+            }
+
+            // Build entities and relationships for /ingest
+            const entities: Array<{ name: string; type: string; context?: string; confidence?: number }> = [];
+            const relationships: Array<{ subject: string; predicate: string; object: string; confidence?: number }> = [];
+            const entityKey = new Set<string>();
+            const addEntity = (name: string, type: string, context?: string) => {
+              const key = `${type}:${name}`;
+              if (entityKey.has(key)) return;
+              entityKey.add(key);
+              entities.push({ name, type, context, confidence: 0.95 });
+            };
+
+            addEntity(intake.bioregion, "Bioregion", `Source bioregion for ${interviewId}`);
+            for (const packet of [...sharedPatterns, ...sharedProtocols]) {
+              addEntity(packet.title, packetTypeToEntityType(packet.packet_type), packet.summary);
+            }
             for (const caseStudy of caseStudyPackets) {
               addEntity(caseStudy.title, "CaseStudy", caseStudy.summary);
             }
 
+            // Lineage edges: Pattern/Protocol → related_to → CaseStudy, about → Bioregion
+            for (const pattern of sharedPatterns) {
+              relationships.push({ subject: pattern.title, predicate: "about", object: intake.bioregion, confidence: 0.95 });
+            }
             for (const protocol of sharedProtocols) {
               relationships.push({ subject: protocol.title, predicate: "about", object: intake.bioregion, confidence: 0.95 });
               for (const patternId of ensureArray(protocol.derived_from_pattern_ids)) {
                 const pattern = sharedPatterns.find((candidate) => candidate.packet_id === patternId);
                 if (pattern) {
-                  relationships.push({ subject: protocol.title, predicate: "about", object: pattern.title, confidence: 0.95 });
+                  relationships.push({ subject: protocol.title, predicate: "related_to", object: pattern.title, confidence: 0.95 });
                 }
               }
             }
-
             for (const caseStudy of caseStudyPackets) {
               relationships.push({ subject: caseStudy.title, predicate: "about", object: intake.bioregion, confidence: 0.95 });
+              // Pattern → related_to → CaseStudy
               for (const patternTitle of ensureArray(caseStudy.linked_pattern_titles)) {
-                relationships.push({ subject: caseStudy.title, predicate: "documents", object: patternTitle, confidence: 0.95 });
+                relationships.push({ subject: patternTitle, predicate: "related_to", object: caseStudy.title, confidence: 0.95 });
               }
+              // Protocol → related_to → CaseStudy
               for (const protocolTitle of ensureArray(caseStudy.linked_protocol_titles)) {
-                relationships.push({ subject: caseStudy.title, predicate: "about", object: protocolTitle, confidence: 0.95 });
+                relationships.push({ subject: protocolTitle, predicate: "related_to", object: caseStudy.title, confidence: 0.95 });
               }
             }
 
@@ -1042,41 +1158,106 @@ const interviewCommoningPlugin = {
               `Case studies: ${caseStudyPackets.map((packet) => packet.title).join(", ") || "none"}.`,
             ].join(" ");
 
-            const ingestResult = await koiRequest("/ingest", "POST", {
-              document_rid: documentRid,
-              source,
-              content,
-              entities,
-              relationships,
-            });
-
-            const noteResults: Array<{ title: string; type: string; path: string; created: boolean }> = [];
+            const noteResults: Array<{ title: string; type: string; path: string; created: boolean; updated: boolean }> = [];
             const warnings: string[] = [];
-            const notePackets = [...sharedPatterns, ...sharedProtocols, ...caseStudyPackets];
-            for (const packet of notePackets) {
-              const type = packetTypeToEntityType(packet.packet_type);
-              const relatedPatterns = type === "Protocol"
-                ? ensureArray(packet.derived_from_pattern_ids)
-                    .map((patternId) => sharedPatterns.find((candidate) => candidate.packet_id === patternId))
-                    .filter(Boolean)
-                    .map((pattern) => `[[Patterns/${noteName((pattern as ReviewPacket).title)}]]`)
-                : [];
-              const aboutLinks = [
-                ...(type === "Protocol" ? relatedPatterns : []),
-                ...(type === "Protocol" || type === "CaseStudy" ? [`[[Bioregions/${noteName(intake.bioregion)}]]`] : []),
-                ...(type === "CaseStudy" ? ensureArray((packet as any).linked_protocol_titles).map((title) => `[[Protocols/${noteName(title)}]]`) : []),
-              ];
-              const documentsLinks = type === "CaseStudy"
-                ? ensureArray((packet as any).linked_pattern_titles).map((title) => `[[Patterns/${noteName(title)}]]`)
-                : [];
+            const writeToWorkspace = !quartzVisible;
+            const visibilityScope = deriveVisibilityScope(intake);
+
+            // Phase 1: Write notes + register entities (creates entities with correct node_private)
+            // Registration happens BEFORE /ingest to close the transient visibility leak window.
+
+            // Publish CaseStudy notes first, collect vault_rids for lineage references
+            const caseStudyRidByTitle = new Map<string, string>();
+            for (const packet of caseStudyPackets) {
+              const type = "CaseStudy";
+              const aboutLinks = [`[[Bioregions/${noteName(intake.bioregion)}]]`];
+              const documentsLinks = ensureArray((packet as any).linked_pattern_titles)
+                .map((title) => `[[Patterns/${noteNameWithOrigin(title, intake.bioregion)}]]`);
               const note = packetBody(packet, intake, { about: aboutLinks, documents: documentsLinks });
-              const writeResult = await writeNoteIfMissing(type, packet.title, note.content);
-              noteResults.push({ title: packet.title, type, path: writeResult.path, created: writeResult.created });
-              if (!writeResult.created) {
-                warnings.push(`Skipped overwriting existing ${type} note: ${writeResult.path}`);
-                continue;
+              const writeResult = await writeOrUpdateNote(type, packet.title, note.content, intake.bioregion, writeToWorkspace);
+              noteResults.push({ title: packet.title, type, path: writeResult.path, created: writeResult.created, updated: writeResult.updated });
+              const rid = vaultRidFor(type, packet.title, intake.bioregion);
+              caseStudyRidByTitle.set(packet.title, rid);
+              if (scope !== "vault_only") {
+                await registerNote(type, packet.title, writeResult.path, note.frontmatter, note.content, intake.bioregion, scope, visibilityScope);
               }
-              await registerNote(type, packet.title, writeResult.path, note.frontmatter, note.content);
+            }
+
+            // Publish Pattern notes, referencing case study RIDs
+            const patternRidByTitle = new Map<string, string>();
+            for (const packet of sharedPatterns) {
+              const type = "Pattern";
+              // Find linked case studies via practice linkage
+              const linkedCaseStudyRids: string[] = [];
+              for (const practiceId of ensureArray(packet.derived_from_practice_ids)) {
+                for (const cs of caseStudyPackets) {
+                  if (ensureArray(cs.derived_from_practice_ids).includes(practiceId)) {
+                    const rid = caseStudyRidByTitle.get(cs.title);
+                    if (rid && !linkedCaseStudyRids.includes(rid)) linkedCaseStudyRids.push(rid);
+                  }
+                }
+              }
+              const aboutLinks = [`[[Bioregions/${noteName(intake.bioregion)}]]`];
+              const note = packetBody(packet, intake, { about: aboutLinks, derivedFromCaseStudyRids: linkedCaseStudyRids });
+              const writeResult = await writeOrUpdateNote(type, packet.title, note.content, intake.bioregion, writeToWorkspace);
+              noteResults.push({ title: packet.title, type, path: writeResult.path, created: writeResult.created, updated: writeResult.updated });
+              const rid = vaultRidFor(type, packet.title, intake.bioregion);
+              patternRidByTitle.set(packet.title, rid);
+              if (scope !== "vault_only") {
+                await registerNote(type, packet.title, writeResult.path, note.frontmatter, note.content, intake.bioregion, scope, visibilityScope);
+              }
+            }
+
+            // Publish Protocol notes, referencing both case study and pattern RIDs
+            for (const packet of sharedProtocols) {
+              const type = "Protocol";
+              const linkedCaseStudyRids: string[] = [];
+              const linkedPatternRids: string[] = [];
+              for (const practiceId of ensureArray(packet.derived_from_practice_ids)) {
+                for (const cs of caseStudyPackets) {
+                  if (ensureArray(cs.derived_from_practice_ids).includes(practiceId)) {
+                    const rid = caseStudyRidByTitle.get(cs.title);
+                    if (rid && !linkedCaseStudyRids.includes(rid)) linkedCaseStudyRids.push(rid);
+                  }
+                }
+              }
+              for (const patternId of ensureArray(packet.derived_from_pattern_ids)) {
+                const pattern = sharedPatterns.find((candidate) => candidate.packet_id === patternId);
+                if (pattern) {
+                  const rid = patternRidByTitle.get(pattern.title);
+                  if (rid && !linkedPatternRids.includes(rid)) linkedPatternRids.push(rid);
+                }
+              }
+              const relatedPatternLinks = ensureArray(packet.derived_from_pattern_ids)
+                .map((patternId) => sharedPatterns.find((candidate) => candidate.packet_id === patternId))
+                .filter(Boolean)
+                .map((pattern) => `[[Patterns/${noteNameWithOrigin((pattern as ReviewPacket).title, intake.bioregion)}]]`);
+              const aboutLinks = [
+                ...relatedPatternLinks,
+                `[[Bioregions/${noteName(intake.bioregion)}]]`,
+              ];
+              const note = packetBody(packet, intake, {
+                about: aboutLinks,
+                derivedFromCaseStudyRids: linkedCaseStudyRids,
+                derivedFromPatternRids: linkedPatternRids,
+              });
+              const writeResult = await writeOrUpdateNote(type, packet.title, note.content, intake.bioregion, writeToWorkspace);
+              noteResults.push({ title: packet.title, type, path: writeResult.path, created: writeResult.created, updated: writeResult.updated });
+              if (scope !== "vault_only") {
+                await registerNote(type, packet.title, writeResult.path, note.frontmatter, note.content, intake.bioregion, scope, visibilityScope);
+              }
+            }
+
+            // Phase 2: /ingest — entities already exist from Phase 1, just adds relationships
+            let ingestResult: any = null;
+            if (scope !== "vault_only") {
+              ingestResult = await koiRequest("/ingest", "POST", {
+                document_rid: documentRid,
+                source,
+                content,
+                entities,
+                relationships,
+              });
             }
 
             const manifest = {
@@ -1087,14 +1268,17 @@ const interviewCommoningPlugin = {
               document_rid: documentRid,
               source,
               published_at: nowIso(),
+              publication_scope: scope,
+              quartz_visible: quartzVisible,
+              federated: scope === "federated",
               publish_entities: entities,
               publish_relationships: relationships,
               note_results: noteResults,
               warnings,
-              ingest_result: {
+              ingest_result: ingestResult ? {
                 receipt_rid: ingestResult.receipt_rid,
                 stats: ingestResult.stats,
-              },
+              } : null,
             };
 
             const publicationDir = safeWorkspacePath(`interviews/publication/${interviewId}`);
@@ -1104,7 +1288,7 @@ const interviewCommoningPlugin = {
             intake.status = "published_shared_artifacts";
             await writeIntake(intake);
 
-            return success({ success: true, manifest_path: `interviews/publication/${interviewId}/manifest.json`, note_results: noteResults, warnings, ingest_result: ingestResult });
+            return success({ success: true, manifest_path: `interviews/publication/${interviewId}/manifest.json`, publication_scope: scope, quartz_visible: quartzVisible, note_results: noteResults, warnings, ingest_result: ingestResult });
           } catch (e: any) {
             return error(e.message);
           }
