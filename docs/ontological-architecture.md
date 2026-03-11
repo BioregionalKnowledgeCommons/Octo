@@ -51,6 +51,26 @@ Without some shared structure, cross-bioregional pattern mining is impossible. I
 
 The BKC ontology provides this. Its 15 entity types (Practice, Pattern, CaseStudy, Bioregion, etc.) and 27 predicates (aggregates_into, suggests, practiced_in, etc.) are the **minimum shared structure** needed for the `aggregates_into` / `suggests` cycle to operate across bioregions.
 
+### Bridge Abstraction, Not Extractive Abstraction
+
+Abstraction is necessary here, but it must be the right kind. A commons layer becomes dangerous when it strips living practices out of their context so they can circulate as decontextualized recipes, scores, or assets. That reproduces the extractive logic the project is trying to avoid.
+
+The BKC ontology should instead support **bridge abstraction**:
+
+- A `Practice` remains situated in a place, community, and history.
+- A `Pattern` is a descriptive generalization derived from multiple practices.
+- A `Protocol` is a prescriptive coordination structure chosen from patterns.
+- A `Playbook` is the local re-instantiation of a protocol under local conditions.
+
+This means every abstraction should preserve a return path to source context:
+
+- provenance to the practices and case studies it was derived from
+- the bioregional conditions under which it worked
+- rights and consent metadata governing reuse
+- failure modes, contraindications, and adaptation notes
+
+In this model, abstraction is a bridge for learning, not a mechanism for flattening or extraction.
+
 ### How This Aligns with the Holon Pattern
 
 The KOI-net architecture already supports this model:
@@ -161,6 +181,12 @@ The agent should have the capability to work with diverse ontologies — but alw
 
 **6. Track provenance.** Record: who contributed this data, when, through what channel, with what permissions, using what schema, mapped by whom, approved by whom.
 
+**7. Separate descriptive and prescriptive artifacts.** A matched `Pattern` is evidence of recurring structure; it is not yet a recommendation to implement. A `Protocol` is prescriptive, and a `Playbook` is the local implementation layer that should carry adaptation notes for a specific bioregion.
+
+**8. Compute contextual fit, not only semantic similarity.** Recommendations should consider ecological conditions, governance structure, social capacity, rights/consent constraints, and known preconditions in addition to textual resemblance. The agent should explain why a recommendation was surfaced and what important mismatches remain.
+
+**9. Carry contraindications forward.** Shared patterns and protocols should include what did not work, where they are a poor fit, and what local review is required before use.
+
 ### What the Agent Should NOT Do
 
 - **Auto-apply mappings without human review.** The mapping from one ontology to another encodes interpretive choices that should be explicit and accountable. Note: the Phase 1 markdown sensor *does* apply mappings programmatically — but only mappings that were human-reviewed and approved during Phase 0.5. The sensor applies pre-approved mappings, not auto-generated ones. If a new source arrives with an unknown schema, the sensor flags it for review rather than guessing.
@@ -168,6 +194,8 @@ The agent should have the capability to work with diverse ontologies — but alw
 - **Strip away source structure that doesn't map.** Unmapped fields may be deeply meaningful in the source community's context.
 - **Treat unmapped concepts as noise.** They may signal gaps in the BKC ontology or genuine incommensurability between frameworks.
 - **Automatically extend the ontology.** Extensions should go through community governance — the agent proposes, humans decide.
+- **Recommend a protocol as if it were context-free because embeddings match.** Similarity is a prompt for review, not proof of transferability.
+- **Optimize for portability at the expense of traceability.** If a pattern cannot be traced back to source practices, stewards, conditions, and permissions, the abstraction is too lossy to trust.
 
 ---
 
@@ -235,6 +263,7 @@ The commons layer is:
 - The substrate for `aggregates_into` / `suggests` pattern mining
 - Governed by the BKC ontology specification (evolvable through community governance)
 - Never the only representation — always accompanied by the source layer
+- Valuable only insofar as abstractions remain reversible enough to recover source context, provenance, and adaptation constraints
 
 **Feedback loop with pattern mining:** The quality and completeness of Phase 0.5/1.1b mappings directly determines the effectiveness of cross-scale pattern mining (Phase 6). An entity only enters the commons layer through an explicit mapping from its source representation. If most source fields are `unmapped`, the commons layer is thin and pattern mining has little to work with. This creates a virtuous cycle: investing in mapping quality during ingestion pays dividends in pattern discovery; discovering useful patterns motivates further mapping work. Monitor the ratio of `equivalent`/`narrower` mappings to `unmapped` fields across source schemas — if a schema has < 30% mapped fields, pattern mining from that source will be limited.
 
