@@ -462,7 +462,15 @@ function evaluatePublishConsent(
   return violations;
 }
 
-function extractBundleToPackets(interviewId: string, intake: IntakeRecord, extracted: JsonMap) {
+function deriveCommitmentSharePolicy(intake: IntakeRecord): string {
+  if (intake.consent_tier === "private" || intake.consent_tier === "restricted") return "do_not_publish";
+  if (intake.consent_tier === "community_only") return "local_only";
+  if (intake.share_scope === "local") return "local_only";
+  if (intake.share_scope === "bioregion") return "shared_within_bioregion";
+  return "federated_derived";
+}
+
+function extractBundleToPackets(interviewId: string, intake: IntakeRecord, extracted: JsonMap, commitmentCandidates: any[] = []) {
   const practices = Array.isArray(extracted.practices) ? extracted.practices : [];
   const patterns = Array.isArray(extracted.patterns) ? extracted.patterns : [];
   const protocols = Array.isArray(extracted.protocols) ? extracted.protocols : [];
@@ -550,12 +558,40 @@ function extractBundleToPackets(interviewId: string, intake: IntakeRecord, extra
     };
   });
 
+  const commitmentPackets: ReviewPacket[] = commitmentCandidates.map((c: any, i: number) => {
+    const title = String(c.title || `Commitment ${i + 1}`).trim();
+    return {
+      packet_type: "CommitmentPacket",
+      packet_id: `commitment-${slugify(title)}-${i}`,
+      interview_id: interviewId,
+      title,
+      summary: String(c.description || "").trim(),
+      pledger_name: String(c.pledger_name || "").trim(),
+      pledger_organization: String(c.pledger_organization || "").trim(),
+      offer_type: String(c.offer_type || "labor").trim(),
+      quantity: c.quantity ?? null,
+      unit: c.unit ? String(c.unit).trim() : null,
+      validity_start: c.validity_start || null,
+      validity_end: c.validity_end || null,
+      estimated_value_usd: c.estimated_value_usd ?? null,
+      routing_tags: ensureArray(c.routing_tags),
+      wants: ensureArray(c.wants),
+      limits: ensureArray(c.limits),
+      confidence: Number(c.confidence || 0.5),
+      source_snippet: String(c.source_snippet || "").trim(),
+      share_policy: deriveCommitmentSharePolicy(intake),
+      approval_status: "pending_review",
+      review: null,
+      created_at: nowIso(),
+    };
+  });
+
   return {
     summary: String(extracted.summary || "").trim(),
     questions,
     claims,
     evidence,
-    packets: [...practicePackets, ...patternPackets, ...protocolPackets],
+    packets: [...practicePackets, ...patternPackets, ...protocolPackets, ...commitmentPackets],
   };
 }
 
@@ -835,7 +871,22 @@ const interviewCommoningPlugin = {
             const transcriptText = await loadTranscriptText(interviewId);
             const model = String(params.model || DEFAULT_MODEL);
             const extracted = await openAiExtract(intake, transcriptText, model);
-            const packetBundle = extractBundleToPackets(interviewId, intake, extracted);
+
+            // Commitment extraction via backend (non-fatal)
+            let commitmentCandidates: any[] = [];
+            try {
+              const extractResp = await koiRequest("/commitments/extract-from-transcript", "POST", {
+                document_text: transcriptText,
+                source_document: interviewId,
+                bioregion: intake.bioregion,
+                confidence_threshold: 0.6,
+              });
+              commitmentCandidates = extractResp?.candidates || [];
+            } catch (e: any) {
+              console.error(`Commitment extraction failed (non-fatal): ${e.message}`);
+            }
+
+            const packetBundle = extractBundleToPackets(interviewId, intake, extracted, commitmentCandidates);
             const reviewDir = safeWorkspacePath(`interviews/review/${interviewId}`);
             await fs.mkdir(reviewDir, { recursive: true });
 
@@ -853,6 +904,16 @@ const interviewCommoningPlugin = {
 
             await writeJsonFile(nodePath.join(reviewDir, "transcript-package.json"), transcriptPackage);
             await writeJsonFile(nodePath.join(reviewDir, "extraction-bundle.json"), extracted);
+
+            if (commitmentCandidates.length > 0) {
+              await writeJsonFile(nodePath.join(reviewDir, "commitment-candidates.json"), {
+                source_document: interviewId,
+                bioregion: intake.bioregion,
+                candidate_count: commitmentCandidates.length,
+                candidates: commitmentCandidates,
+                extracted_at: nowIso(),
+              });
+            }
 
             for (const packet of packetBundle.packets) {
               await writeJsonFile(nodePath.join(reviewDir, `${packet.packet_id}.json`), packet);
@@ -883,6 +944,7 @@ const interviewCommoningPlugin = {
                 practices: packetBundle.packets.filter((p) => p.packet_type === "PracticePacket").length,
                 patterns: packetBundle.packets.filter((p) => p.packet_type === "PatternCandidatePacket").length,
                 protocols: packetBundle.packets.filter((p) => p.packet_type === "ProtocolCandidatePacket").length,
+                commitments: packetBundle.packets.filter((p) => p.packet_type === "CommitmentPacket").length,
               },
             });
           } catch (e: any) {
@@ -1044,8 +1106,14 @@ const interviewCommoningPlugin = {
               ? packets.filter((packet) => packet.packet_type === "PracticePacket" && (packet.approval_status === "approved_local" || packet.approval_status === "approved_shared") && packet.share_policy === "shared_summary")
               : [];
 
-            if (sharedPatterns.length === 0 && sharedProtocols.length === 0 && sharedPracticeSummaries.length === 0) {
-              throw new Error("No approved shared packets found. Approve at least one pattern, protocol, or shared_summary practice first.");
+            const approvedCommitments = packets.filter(
+              (p) => p.packet_type === "CommitmentPacket" &&
+                p.share_policy !== "do_not_publish" &&
+                (p.approval_status === "approved_local" || p.approval_status === "approved_shared")
+            );
+
+            if (sharedPatterns.length === 0 && sharedProtocols.length === 0 && sharedPracticeSummaries.length === 0 && approvedCommitments.length === 0) {
+              throw new Error("No approved packets found. Approve at least one pattern, protocol, practice, or commitment first.");
             }
 
             // Derive publication scope and visibility from consent model
@@ -1260,6 +1328,87 @@ const interviewCommoningPlugin = {
               });
             }
 
+            // Phase 3: Publish approved commitments via commitment API
+            let bioregionUri = "";
+            if (intake.bioregion && scope !== "vault_only") {
+              try {
+                const searchResult = await koiRequest(
+                  `/entity-search?query=${encodeURIComponent(intake.bioregion)}&limit=3&entity_type=Bioregion`, "GET"
+                );
+                const match = searchResult?.results?.find(
+                  (r: any) => r.entity_type === "Bioregion"
+                );
+                bioregionUri = match?.fuseki_uri || "";
+              } catch {}
+              if (!bioregionUri) {
+                warnings.push(`Bioregion "${intake.bioregion}" not found in graph — routing scores will lack bioregion matching.`);
+              }
+            }
+
+            const commitmentResults: any[] = [];
+            if (scope !== "vault_only") {
+              for (const cp of approvedCommitments) {
+                // Resolve pledger
+                const pledgerName = cp.pledger_organization || cp.pledger_name;
+                let pledgerUri = "";
+                if (pledgerName) {
+                  try {
+                    const searchResult = await koiRequest(`/entity-search?query=${encodeURIComponent(pledgerName)}&limit=3`, "GET");
+                    const match = searchResult?.results?.find((r: any) => r.name.toLowerCase() === pledgerName.toLowerCase());
+                    pledgerUri = match?.fuseki_uri || "";
+                  } catch {}
+                }
+                if (!pledgerUri) {
+                  warnings.push(`Commitment "${cp.title}": pledger "${pledgerName}" not found. Skipping.`);
+                  continue;
+                }
+
+                const commitmentBody = {
+                  pledger_uri: pledgerUri,
+                  title: cp.title,
+                  description: cp.summary,
+                  offer_type: cp.offer_type,
+                  quantity: cp.quantity || null,
+                  unit: cp.unit || null,
+                  validity_start: cp.validity_start || null,
+                  validity_end: cp.validity_end || null,
+                  metadata: {
+                    wants: cp.wants || [],
+                    limits: cp.limits || [],
+                    bioregion_uri: bioregionUri,
+                    estimated_value_usd: cp.estimated_value_usd,
+                    routing_tags: cp.routing_tags || [],
+                    source_interview_id: interviewId,
+                    ai_confidence: cp.confidence,
+                    ...(cp.share_policy === "local_only" && intake.consent_tier === "community_only"
+                      ? { visibility_scope: "node_private" }
+                      : {}),
+                  },
+                  created_by: `interview-commoning:${getNodeId()}`,
+                };
+
+                try {
+                  const result = await koiRequest("/commitments/create", "POST", commitmentBody);
+                  let suggestions: any[] = [];
+                  try {
+                    const routeResp = await koiRequest("/commitments/routing-suggestions", "POST", commitmentBody);
+                    suggestions = routeResp?.suggestions || [];
+                  } catch {}
+
+                  commitmentResults.push({
+                    title: cp.title,
+                    commitment_rid: result.commitment_rid,
+                    pledger: pledgerName,
+                    state: "PROPOSED",
+                    top_pool: suggestions[0]?.pool_name || "none",
+                    top_score: suggestions[0]?.total_score || 0,
+                  });
+                } catch (e: any) {
+                  warnings.push(`Commitment "${cp.title}": creation failed: ${e.message}`);
+                }
+              }
+            }
+
             const manifest = {
               manifest_id: `${interviewId}-manifest`,
               interview_id: interviewId,
@@ -1274,9 +1423,11 @@ const interviewCommoningPlugin = {
               publish_entities: entities,
               publish_relationships: relationships,
               note_results: noteResults,
+              commitment_results: commitmentResults,
               warnings,
               ingest_result: ingestResult ? {
-                receipt_rid: ingestResult.receipt_rid,
+                receipt_id: ingestResult.receipt_id || ingestResult.receipt_rid,
+                receipt_rid: ingestResult.receipt_rid || ingestResult.receipt_id,  // backwards compat
                 stats: ingestResult.stats,
               } : null,
             };
@@ -1288,7 +1439,7 @@ const interviewCommoningPlugin = {
             intake.status = "published_shared_artifacts";
             await writeIntake(intake);
 
-            return success({ success: true, manifest_path: `interviews/publication/${interviewId}/manifest.json`, publication_scope: scope, quartz_visible: quartzVisible, note_results: noteResults, warnings, ingest_result: ingestResult });
+            return success({ success: true, manifest_path: `interviews/publication/${interviewId}/manifest.json`, publication_scope: scope, quartz_visible: quartzVisible, note_results: noteResults, commitment_results: commitmentResults, warnings, ingest_result: ingestResult });
           } catch (e: any) {
             return error(e.message);
           }
