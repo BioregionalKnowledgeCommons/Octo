@@ -1,0 +1,15 @@
+{
+  "name": "bkc-eas-attestation",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Celo EAS attestation for BKC proof packs",
+  "scripts": {
+    "attest": "npx tsx attest.ts",
+    "register-schema": "npx tsx attest.ts --register-schema"
+  },
+  "dependencies": {
+    "@ethereum-attestation-service/eas-sdk": "^2.9.0",
+    "dotenv": "^16.4.7",
+    "tsx": "^4.19.0"
+  }
+}
