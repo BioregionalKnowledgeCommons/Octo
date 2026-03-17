@@ -85,7 +85,7 @@ x-ingest-token: <token>
 
 ### Field Notes
 
-**`document_rid`** — Required. Unique identifier for this ingest event. Format: `<source>:<type>:<room_or_session_id>:<iso_timestamp>`. Used as a partial idempotency key: entity-link records (`document_rid` + `entity_uri`) use `ON CONFLICT DO UPDATE` so duplicate entity mentions increment a counter rather than erroring. However, the receipt RID is a fresh UUID on every call — do not rely on receipt identity across retries.
+**`document_rid`** — Required. Unique identifier for this ingest event. Format: `<source>:<type>:<room_or_session_id>:<iso_timestamp>`. Used as a partial idempotency key: entity-link records (`document_rid` + `entity_uri`) use `ON CONFLICT DO UPDATE` so duplicate entity mentions increment a counter rather than erroring. The `receipt_id` is a deterministic SHA-256 hash of (transformation_type + input_rid + output_rid + timestamp) — not stable across retries since the timestamp changes.
 
 **`source`** — Required. Must be `"clawsmos-summarizer"` or a more specific variant (e.g., `"clawsmos-summarizer:front-range"`). Used for provenance tracking and filtering.
 
@@ -132,7 +132,9 @@ x-ingest-token: <token>
       "confidence": 0.97
     }
   ],
-  "receipt_rid": "orn:personal-koi.receipt:a1b2c3d4e5f6a7b8",
+  "receipt_id": "a3b2f1e4c5d6...sha256hash",
+  "receipt_rid": "a3b2f1e4c5d6...sha256hash",
+  "receipt_persisted": true,
   "stats": {
     "entities_processed": 5,
     "new_entities": 2,
@@ -144,7 +146,11 @@ x-ingest-token: <token>
 
 **`canonical_entities`** — The resolved canonical form of each submitted entity. `is_new: true` means a new entity was created. `merged_with` (if not null) is the URI of the entity it was deduplicated into.
 
-**`receipt_rid`** — Provenance receipt. A fresh `orn:personal-koi.receipt:<uuid>` is generated on every call — it is NOT stable across retries.
+**`receipt_id`** — Real CAT (Content Addressable Transformation) receipt ID (SHA-256 hash). Created as a row in `koi_transformation_receipts` with `transformation_type="entity_ingest"`. Supports `parent_receipt_id` chaining for provenance tracking. The receipt chain can be queried via `GET /receipts/{receipt_id}/chain`. Always a SHA-256 hash regardless of whether persistence succeeded — check `receipt_persisted` to confirm the receipt was written to the database.
+
+**`receipt_rid`** — Deprecated alias for `receipt_id`. Both fields return the same value.
+
+**`receipt_persisted`** — `true` if the receipt was written to `koi_transformation_receipts`. `false` if the receipt DB write failed (the `receipt_id` is still a valid SHA-256 hash but exists only in this response, not in the database). Callers should log a warning when `false`.
 
 **`stats`** — Counts for the operation. `resolved_entities` counts entities matched to existing records; `new_entities` counts freshly created records.
 
@@ -165,7 +171,7 @@ x-ingest-token: <token>
 
 **Partial idempotency:** `document_rid` is used as part of the entity-link key (`document_rid` + `entity_uri` in `document_entity_links`). Resubmitting the same `document_rid` will increment mention counts rather than creating duplicate link rows. However:
 - Entity records themselves use name+type deduplication (not `document_rid`) — submitting the same entity name twice always resolves to the same canonical URI
-- The `receipt_rid` in the response is a fresh UUID on every call — do not expect the same receipt on retry
+- The `receipt_id` is a SHA-256 hash of (transformation_type + input_rid + output_rid + timestamp) — deterministic but not stable across retries since timestamp changes
 - There is no request-level duplicate detection — a retry will re-run the full resolution pipeline
 
 **Retry policy recommendation:** Safe to retry on 502 (upstream unreachable). Do NOT retry on 400 or 401 (caller error). On retry, the same `document_rid` prevents duplicate entity-link rows; new entities are skipped if already created by the first attempt.
@@ -211,7 +217,8 @@ curl -X POST https://salishsee.life/commons/api/nodes/octo-salish-sea/ingest \
     {"name": "Bioregional Knowledge Commons", "uri": "bkc:org:bioregional-knowledge-commons", "type": "Organization", "is_new": false, "merged_with": null, "confidence": 0.98},
     {"name": "Build Day Mar 5 2026", "uri": "bkc:meeting:build-day-mar-5-2026", "type": "Meeting", "is_new": true, "merged_with": null, "confidence": 1.0}
   ],
-  "receipt_rid": "orn:personal-koi.receipt:a1b2c3d4e5f60001",
+  "receipt_id": "a1b2c3d4e5f60001...sha256hash",
+  "receipt_rid": "a1b2c3d4e5f60001...sha256hash",
   "stats": {"entities_processed": 5, "new_entities": 3, "resolved_entities": 2, "relationships_processed": 4}
 }
 ```
@@ -240,7 +247,7 @@ Before freezing this contract (by Mar 3, 18:00 MT):
 - [ ] At least one successful test call executed against live `/ingest` endpoint
 - [ ] At least one failure case tested (wrong token, missing `source`, malformed JSON)
 - [ ] Entity resolution confirmed working (try submitting "Darren Zal" twice — second call should return `is_new: false`)
-- [ ] Partial idempotency confirmed (same `document_rid` twice → no duplicate entity-link rows; entity records deduplicated by name+type; receipt is a fresh UUID each call — that is expected)
+- [ ] Partial idempotency confirmed (same `document_rid` twice → no duplicate entity-link rows; entity records deduplicated by name+type; receipt is a deterministic SHA-256 hash but not stable across retries due to timestamp — that is expected)
 - [ ] Response schema confirmed compatible with Clawsmos Summarizer's expectations
 - [ ] Error handling policy agreed: Summarizer should retry on 502 (upstream unreachable) but NOT on 401/400/400 (caller error)
 
@@ -256,7 +263,7 @@ Before freezing this contract (by Mar 3, 18:00 MT):
 
 4. **Federation:** Newly created entities become eligible for federation to connected nodes (FR, GV, CV) via KOI-net protocol on the next federation cycle.
 
-5. **Provenance:** A `receipt_rid` (`orn:personal-koi.receipt:<uuid>`) is returned for each call. This is a fresh UUID per call (not stable across retries).
+5. **Provenance:** A `receipt_id` is returned for each call — a real CAT receipt row in `koi_transformation_receipts`. Supports `parent_receipt_id` chaining for multi-step provenance. Receipt chain queryable via `GET /receipts/{receipt_id}/chain`. `receipt_rid` is a deprecated alias returning the same value.
 
 ---
 

@@ -1,0 +1,21 @@
+{
+  "name": "bkc-celo-commitment-economy",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Celo commitment voucher token + TBFF settlement scripts for BKC",
+  "scripts": {
+    "deploy-token": "npx tsx deploy-token.ts",
+    "mint": "npx tsx mint-commitment-token.ts",
+    "deploy-settler": "npx tsx deploy-settler.ts",
+    "settle": "npx tsx deploy-settler.ts --settle",
+    "transcribe": "npx tsx transcribe-and-extract.ts",
+    "agent-commit": "npx tsx agent-self-commit.ts",
+    "deploy-demo-settler": "npx tsx deploy-demo-settler.ts",
+    "demo": "bash demo-full-loop.sh"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "ethers": "^6.13.0",
+    "tsx": "^4.19.0"
+  }
+}
