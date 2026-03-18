@@ -2,12 +2,13 @@
 # demo-full-loop.sh — End-to-end commitment economy demo
 #
 # Flow: Audio → Transcript → Commitments+Needs → Verify → Mint VCV → Agent Commits
-#       → TBFF Settle → Settlement Evidence → Claim → EAS Attest
+#       → TBFF Settle → Claim-from-Settlement → Anchor → EAS Attest → SwapPool
 #
 # Usage: bash demo-full-loop.sh <audio-file>
 #        bash demo-full-loop.sh --skip-audio          (use existing commitments)
 #        bash demo-full-loop.sh --act2-only            (agent self-commit only)
 #        bash demo-full-loop.sh --act3-only            (settle + attest only)
+#        bash demo-full-loop.sh --act4-only            (pool operations only)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -32,6 +33,18 @@ update_result() {
   local key=$1 val=$2
   local tmp=$(mktemp)
   jq --arg k "$key" --arg v "$val" '. + {($k): $v}' "$RESULTS_FILE" > "$tmp" && mv "$tmp" "$RESULTS_FILE"
+}
+
+# Resolve entity URIs (used by Act 3)
+resolve_entity() {
+  local query=$1 entity_type=$2
+  local uri
+  uri=$(curl -sf "$KOI_BASE/entity-search?query=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$query', safe=''))")&entity_type=$entity_type" | jq -er '.results[0].fuseki_uri') || {
+    warn "Entity not found: $query ($entity_type)"
+    echo ""
+    return 1
+  }
+  echo "$uri"
 }
 
 # Check prerequisites
@@ -160,7 +173,7 @@ act2_agent() {
 
 # ================================================================
 # ACT 3: Settlement + Proof
-# TBFF settle → settlement evidence → claim → EAS attest
+# TBFF settle → claim-from-settlement → anchor → EAS attest
 # ================================================================
 act3_settle() {
   echo ""
@@ -168,9 +181,11 @@ act3_settle() {
   log "ACT 3: TBFF Settlement + Attestation"
   echo "================================================================"
 
-  # 3a. Check settler status
-  log "Step 3a: Checking settler status..."
-  npx tsx deploy-settler.ts 2>&1 | head -20
+  # 3a. Capture pre-settle network state
+  log "Step 3a: Capturing pre-settle network state..."
+  local pre_state
+  pre_state=$(npx tsx deploy-settler.ts --status-json 2>/dev/null || echo '{"nodes":[]}')
+  echo "$pre_state" | jq -r '.nodes[] | "  \(.label): balance=\(.balance) threshold=\(.threshold)"'
 
   # 3b. Execute settlement
   log "Step 3b: Executing TBFF settlement..."
@@ -182,78 +197,216 @@ act3_settle() {
   settle_tx=$(echo "$settle_output" | grep "^TX:" | head -1 | awk '{print $2}')
   if [ -z "$settle_tx" ]; then
     warn "Could not extract settle TX hash"
-    settle_tx="unknown"
+    settle_tx="demo-settle-$(date +%s)"
   fi
   update_result "settle_tx" "$settle_tx"
 
-  # 3c. Create settlement evidence
-  log "Step 3c: Creating settlement evidence..."
-  local evidence_resp
-  evidence_resp=$(curl -sf -X POST "$KOI_BASE/claims/evidence-from-settlement" \
+  # Read post-settle values from contract
+  local iterations converged total_redistributed
+  iterations=$(echo "$settle_output" | grep "^Iterations:" | awk '{print $2}')
+  converged=$(echo "$settle_output" | grep "^Converged:" | awk '{print $2}')
+  total_redistributed=$(echo "$settle_output" | grep "^Total redistributed:" | awk '{print $3}')
+  iterations=${iterations:-1}
+  converged=${converged:-true}
+  total_redistributed=${total_redistributed:-0.0}
+
+  # 3b-post. Capture post-settle network state
+  log "Step 3b-post: Capturing post-settle state..."
+  local post_state
+  post_state=$(npx tsx deploy-settler.ts --status-json 2>/dev/null || echo '{"nodes":[]}')
+  echo "$post_state" | jq -r '.nodes[] | "  \(.label): balance=\(.balance) threshold=\(.threshold)"'
+
+  # Build node_balances array from pre/post state
+  local node_balances
+  node_balances=$(jq -n --argjson pre "$pre_state" --argjson post "$post_state" '
+    [range($pre.nodes | length)] | map({
+      participant_name: $pre.nodes[.].label,
+      initial_balance: $pre.nodes[.].balance,
+      final_balance: $post.nodes[.].balance,
+      threshold: $pre.nodes[.].threshold
+    })
+  ')
+
+  # 3c. Resolve entity URIs for claim-from-settlement
+  log "Step 3c: Resolving entities + creating claim from settlement..."
+  local claimant_uri about_uri reviewer_uri operator_uri
+  claimant_uri=$(resolve_entity "Victoria Landscape Hub" "Organization") || true
+  about_uri=$(resolve_entity "Salish Sea" "Bioregion") || true
+  reviewer_uri=$(resolve_entity "Darren" "Person") || true
+  operator_uri=$(resolve_entity "Regenerate Cascadia" "Organization") || true
+
+  if [ -z "$claimant_uri" ] || [ -z "$reviewer_uri" ]; then
+    warn "Could not resolve required entities — using available URIs"
+    # Try fallbacks
+    [ -z "$claimant_uri" ] && claimant_uri=$(resolve_entity "Victoria" "Organization") || true
+    [ -z "$reviewer_uri" ] && reviewer_uri=$(resolve_entity "Darren Zal" "Person") || true
+  fi
+
+  if [ -z "$claimant_uri" ] || [ -z "$reviewer_uri" ]; then
+    warn "Cannot create claim — missing claimant or reviewer entity"
+    update_result "claim_rid" "skipped_no_entities"
+    log "Act 3 complete (partial — entity resolution failed)"
+    return
+  fi
+
+  # Single POST /claims/claim-from-settlement — creates evidence + claim + auto-advance
+  local claim_resp
+  claim_resp=$(curl -sf -X POST "$KOI_BASE/claims/claim-from-settlement" \
     -H 'Content-Type: application/json' \
-    -d "$(jq -n --arg tx "$settle_tx" '{
-      settlement_data: {
-        total_redistributed_usd: 100,
-        participants: ["darren", "octo-agent"],
-        settle_tx_hash: $tx,
-        chain_id: 42220,
-        token_address: "0x4CDb98Ff88af070b1794752932DbAD9Edf7a1573",
-        settler_address: "0x10De66A7f4e20d696Fb0d815c99068D4fA1f9030",
-        converged: true,
-        iterations: 3
-      },
-      operator_uri: "orn:koi-net.node:octo-salish-sea+f06551d75797303be1831a1e00b41cf930625961882082346cb3932175a17716"
-    }')" 2>/dev/null || echo '{"error": "settlement endpoint may not exist"}')
+    -d "$(jq -n \
+      --arg sid "$settle_tx" \
+      --arg tx "$settle_tx" \
+      --argjson iter "${iterations}" \
+      --argjson conv "${converged}" \
+      --argjson total "${total_redistributed}" \
+      --argjson nb "$node_balances" \
+      --arg claimant "$claimant_uri" \
+      --arg about "${about_uri:-}" \
+      --arg reviewer "$reviewer_uri" \
+      --arg operator "${operator_uri:-}" \
+      '{
+        settlement: {
+          settlement_id: $sid,
+          tx_hash: $tx,
+          chain_id: 42220,
+          iterations: $iter,
+          converged: $conv,
+          total_redistributed_usd: $total,
+          node_balances: $nb,
+          bioregion: "Salish Sea",
+          description: ("TBFF settlement redistributed $" + ($total | tostring) + " VCV across Victoria Landscape Hub participants based on needs-weighted thresholds. TX: " + $tx)
+        },
+        claimant_uri: $claimant,
+        about_uri: (if $about == "" then null else $about end),
+        statement: ("TBFF settlement redistributed $" + ($total | tostring) + " VCV across commitment pool participants, verifying community resource flows in the Salish Sea bioregion."),
+        claim_type: "financial",
+        reviewer_uri: $reviewer,
+        operator_uri: (if $operator == "" then null else $operator end)
+      }')" 2>/dev/null || echo '{"error": "claim-from-settlement failed"}')
 
-  local evidence_uri
-  evidence_uri=$(echo "$evidence_resp" | jq -r '.evidence_uri // .entity_uri // "none"')
-  log "Settlement evidence: $evidence_uri"
-  update_result "settlement_evidence" "$evidence_uri"
+  echo "$claim_resp" | jq '.'
 
-  # 3d. Create claim from a verified commitment
-  log "Step 3d: Creating claim from commitment..."
-  local first_verified
-  first_verified=$(curl -sf "$KOI_BASE/commitments/?state=VERIFIED&limit=1" | jq -r '.[0].commitment_rid // empty')
+  local claim_rid verification auto_advanced evidence_uri
+  claim_rid=$(echo "$claim_resp" | jq -r '.claim_rid // "none"')
+  verification=$(echo "$claim_resp" | jq -r '.verification // "unknown"')
+  auto_advanced=$(echo "$claim_resp" | jq -r '.auto_advanced // false')
+  evidence_uri=$(echo "$claim_resp" | jq -r '.evidence_uri // "none"')
 
-  if [ -n "$first_verified" ]; then
-    local claim_resp
-    claim_resp=$(curl -sf -X POST "$KOI_BASE/commitments/$(python3 -c "import urllib.parse; print(urllib.parse.quote('$first_verified', safe=''))")/create-claim" \
-      -H 'Content-Type: application/json' \
-      -d '{"actor": "demo-full-loop"}' 2>/dev/null || echo '{"error": "claim creation failed"}')
+  log "Claim: $claim_rid"
+  log "Verification: $verification (auto_advanced=$auto_advanced)"
+  log "Evidence: $evidence_uri"
+  update_result "claim_rid" "$claim_rid"
+  update_result "claim_verification" "$verification"
+  update_result "evidence_uri" "$evidence_uri"
 
-    local claim_rid
-    claim_rid=$(echo "$claim_resp" | jq -r '.claim_rid // "none"')
-    log "Claim: $claim_rid"
-    update_result "claim_rid" "$claim_rid"
+  # 3d. Anchor claim if verified
+  if [ "$verification" = "verified" ] && [ "$claim_rid" != "none" ]; then
+    log "Step 3d: Anchoring claim on Regen Ledger..."
+    local encoded_rid
+    encoded_rid=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$claim_rid', safe=''))")
 
-    # 3e. EAS attestation (if claim was anchored)
-    if [ "$claim_rid" != "none" ]; then
-      log "Step 3e: Checking if claim can be attested..."
-      # Check claim state
-      local claim_state
-      claim_state=$(curl -sf "$KOI_BASE/claims/$(python3 -c "import urllib.parse; print(urllib.parse.quote('$claim_rid', safe=''))")" 2>/dev/null | jq -r '.verification // "unknown"')
-      log "Claim state: $claim_state"
+    # Prepare anchor (compute content hash)
+    local prepare_resp
+    prepare_resp=$(curl -sf -X POST "$KOI_BASE/claims/${encoded_rid}/prepare-anchor" 2>/dev/null || echo '{"error":"prepare failed"}')
+    log "Prepare-anchor: $(echo "$prepare_resp" | jq -r '.content_hash // .error // "ok"' | head -c 40)"
 
-      if [ "$claim_state" = "ledger_anchored" ]; then
-        log "Creating EAS attestation..."
-        cd "$SCRIPT_DIR/../eas"
-        local attest_output
-        attest_output=$(npx tsx attest.ts "$claim_rid" 2>&1)
-        echo "$attest_output" | grep -E "^(Attestation UID|View:)" || true
-        local attest_uid
-        attest_uid=$(echo "$attest_output" | grep "Attestation UID:" | awk '{print $3}')
-        update_result "eas_attestation" "${attest_uid:-pending}"
-        cd "$SCRIPT_DIR"
-      else
-        log "Claim not yet ledger_anchored — attestation deferred"
-        update_result "eas_attestation" "deferred_${claim_state}"
+    # Anchor
+    local anchor_resp anchor_status
+    anchor_resp=$(curl -sf -w '\n%{http_code}' -X POST "$KOI_BASE/claims/${encoded_rid}/anchor" 2>/dev/null || echo -e '{"error":"anchor failed"}\n503')
+    anchor_status=$(echo "$anchor_resp" | tail -1)
+    local anchor_body
+    anchor_body=$(echo "$anchor_resp" | sed '$d')
+
+    if [ "$anchor_status" = "200" ]; then
+      log "Claim anchored successfully"
+      update_result "anchor_status" "ledger_anchored"
+      verification="ledger_anchored"
+    elif [ "$anchor_status" = "202" ]; then
+      log "Anchor broadcast but confirmation timed out — reconciling..."
+      update_result "anchor_status" "pending"
+      # Poll reconcile (max 6 retries, 5s sleep)
+      local reconcile_count=0
+      while [ $reconcile_count -lt 6 ]; do
+        sleep 5
+        local reconcile_resp
+        reconcile_resp=$(curl -sf -X POST "$KOI_BASE/claims/${encoded_rid}/reconcile" 2>/dev/null || echo '{"status":"error"}')
+        local rec_status
+        rec_status=$(echo "$reconcile_resp" | jq -r '.status // "error"')
+        log "  Reconcile attempt $((reconcile_count + 1)): $rec_status"
+        if [ "$rec_status" = "anchored" ]; then
+          log "Claim anchored via reconcile"
+          update_result "anchor_status" "ledger_anchored"
+          verification="ledger_anchored"
+          break
+        elif [ "$rec_status" = "failed" ]; then
+          warn "Anchor failed on-chain"
+          update_result "anchor_status" "failed"
+          break
+        fi
+        reconcile_count=$((reconcile_count + 1))
+      done
+      if [ $reconcile_count -ge 6 ]; then
+        warn "Reconcile timed out — claim stays at verified"
+        update_result "anchor_status" "reconcile_timeout"
       fi
+    else
+      warn "Anchor returned $anchor_status — claim stays at verified"
+      update_result "anchor_status" "unavailable_${anchor_status}"
     fi
+  elif [ "$claim_rid" != "none" ]; then
+    log "Claim at $verification — anchor requires verified state"
+    update_result "anchor_status" "skipped_${verification}"
+  fi
+
+  # 3e. EAS attestation (requires ledger_anchored)
+  if [ "$verification" = "ledger_anchored" ] && [ "$claim_rid" != "none" ]; then
+    log "Step 3e: Creating EAS attestation..."
+    cd "$SCRIPT_DIR/../eas"
+    local attest_output
+    attest_output=$(npx tsx attest.ts "$claim_rid" 2>&1)
+    echo "$attest_output" | grep -E "^(Attestation UID|View:)" || true
+    local attest_uid
+    attest_uid=$(echo "$attest_output" | grep "Attestation UID:" | awk '{print $3}')
+    update_result "eas_attestation" "${attest_uid:-pending}"
+    cd "$SCRIPT_DIR"
   else
-    warn "No verified commitments found for claim creation"
+    log "EAS attestation deferred (claim at $verification, needs ledger_anchored)"
+    update_result "eas_attestation" "deferred_${verification}"
   fi
 
   log "Act 3 complete"
+}
+
+# ================================================================
+# ACT 4: SwapPool Operations
+# Show pool status, execute swap or quote
+# ================================================================
+act4_pool() {
+  echo ""
+  echo "================================================================"
+  log "ACT 4: SwapPool Operations"
+  echo "================================================================"
+
+  # Check if pool is deployed
+  if ! grep -q SWAP_POOL_ADDRESS .env 2>/dev/null; then
+    warn "SWAP_POOL_ADDRESS not in .env — pool not deployed yet"
+    log "Deploy with: npx tsx deploy-swap-pool.ts"
+    update_result "pool_status" "not_deployed"
+    return
+  fi
+
+  # 4a. Show pool status
+  log "Step 4a: Pool status..."
+  npx tsx deploy-swap-pool.ts --status 2>&1
+
+  # 4b. Try a quote
+  log "Step 4b: Getting quote for 100 VCV → cUSD..."
+  local quote_output
+  quote_output=$(npx tsx execute-swap.ts --quote 100 2>&1 || echo "Quote failed")
+  echo "$quote_output"
+  update_result "pool_quote" "$(echo "$quote_output" | grep "Quote:" | head -1 || echo "none")"
+
+  log "Act 4 complete"
 }
 
 # ================================================================
@@ -298,10 +451,17 @@ main() {
     return
   fi
 
+  if [[ " ${args[*]:-} " =~ " --act4-only " ]]; then
+    act4_pool
+    print_summary
+    return
+  fi
+
   if [[ " ${args[*]:-} " =~ " --skip-audio " ]]; then
     log "Skipping Act 1 (--skip-audio)"
     act2_agent
     act3_settle
+    act4_pool
     print_summary
     return
   fi
@@ -313,6 +473,7 @@ main() {
     echo "  bash demo-full-loop.sh --skip-audio        Skip transcription"
     echo "  bash demo-full-loop.sh --act2-only         Agent self-commit only"
     echo "  bash demo-full-loop.sh --act3-only         Settle + attest only"
+    echo "  bash demo-full-loop.sh --act4-only         Pool operations only"
     exit 1
   fi
 
@@ -321,6 +482,7 @@ main() {
   act1_human "$audio_file"
   act2_agent
   act3_settle
+  act4_pool
   print_summary
 }
 

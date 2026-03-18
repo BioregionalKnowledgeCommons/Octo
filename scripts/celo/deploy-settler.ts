@@ -151,6 +151,37 @@ async function settle(): Promise<void> {
   console.log(`Total redistributed: ${ethers.formatUnits(totalRedist, 6)} VCV`);
 }
 
+// Address → label map (matches deploy-demo-settler.ts participants)
+const ADDRESS_LABELS: Record<string, string> = {
+  "0x6f844901ACc577F10575e90B2264e186AEe1bA73": "Darren (Human Participant)",
+};
+
+async function statusJson(): Promise<void> {
+  const signer = getSigner();
+  const settler = getSettler(signer);
+
+  const [nodes, balances, thresholds] = await settler.getNetworkState();
+  const agentAddress = await signer.getAddress();
+
+  const nodeArray = [];
+  for (let i = 0; i < nodes.length; i++) {
+    const addr = nodes[i] as string;
+    let label = ADDRESS_LABELS[addr] || `Node ${i}`;
+    if (addr.toLowerCase() === agentAddress.toLowerCase() && !ADDRESS_LABELS[addr]) {
+      label = "Octo Agent";
+    }
+    nodeArray.push({
+      address: addr,
+      label,
+      balance: parseFloat(ethers.formatUnits(balances[i], 6)),
+      threshold: parseFloat(ethers.formatUnits(thresholds[i], 6)),
+    });
+  }
+
+  const output = JSON.stringify({ nodes: nodeArray });
+  console.log(output);
+}
+
 // --- Main ---
 
 async function main() {
@@ -158,6 +189,11 @@ async function main() {
 
   if (args.includes("--settle")) {
     await settle();
+    return;
+  }
+
+  if (args.includes("--status-json")) {
+    await statusJson();
     return;
   }
 
