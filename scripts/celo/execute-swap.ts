@@ -182,24 +182,24 @@ async function swap(amount: string, direction: "vcv-to-cusd" | "cusd-to-vcv"): P
   console.log(`\n=== Executing Swap ===`);
   console.log(`${amount} ${inSymbol} → ${ethers.formatUnits(quoteResult, outDecimals)} ${outSymbol}`);
 
-  // 2. Approve pool to spend inToken
+  // 2. Approve pool to spend inToken (reset-to-0 first — GiftableToken safe approve)
   const inTokenContract = new ethers.Contract(inToken, ERC20_ABI, signer);
   console.log(`\nApproving ${inSymbol}...`);
-  const approveTx = await inTokenContract.approve(POOL_ADDRESS, inAmount);
+  try {
+    const resetTx = await inTokenContract.approve(POOL_ADDRESS, 0, { gasLimit: 100000 });
+    await resetTx.wait();
+  } catch { /* already 0 */ }
+  const approveTx = await inTokenContract.approve(POOL_ADDRESS, inAmount, { gasLimit: 100000 });
   await approveTx.wait();
 
-  // 3. Deposit inToken into pool
-  console.log(`Depositing ${amount} ${inSymbol} into pool...`);
-  const depositTx = await pool.deposit(inToken, inAmount);
-  await depositTx.wait();
-
-  // 4. Withdraw outToken (this is the swap)
-  console.log(`Withdrawing ${outSymbol}...`);
+  // 3. Swap: withdraw calls deposit internally (SwapPool.sol:221)
+  console.log(`Swapping ${amount} ${inSymbol} → ${outSymbol}...`);
   const withdrawTx = await (pool as any)["withdraw(address,address,uint256,bool)"](
     outToken,
     inToken,
     inAmount,
-    false, // don't deduct fee (fee is 0 anyway)
+    false,
+    { gasLimit: 300000 },
   );
   const receipt = await withdrawTx.wait();
 

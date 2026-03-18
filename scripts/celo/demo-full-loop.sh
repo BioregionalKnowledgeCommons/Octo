@@ -181,16 +181,23 @@ act3_settle() {
   log "ACT 3: TBFF Settlement + Attestation"
   echo "================================================================"
 
+  # Determine which settler script to use
+  local settler_script="deploy-settler.ts"
+  if [ -n "${MULTI_SETTLER_ADDRESS:-}" ]; then
+    settler_script="deploy-multi-settler.ts"
+    log "Using multi-participant settler: $MULTI_SETTLER_ADDRESS"
+  fi
+
   # 3a. Capture pre-settle network state
   log "Step 3a: Capturing pre-settle network state..."
   local pre_state
-  pre_state=$(npx tsx deploy-settler.ts --status-json 2>/dev/null || echo '{"nodes":[]}')
+  pre_state=$(npx tsx "$settler_script" --status-json 2>/dev/null || echo '{"nodes":[]}')
   echo "$pre_state" | jq -r '.nodes[] | "  \(.label): balance=\(.balance) threshold=\(.threshold)"'
 
   # 3b. Execute settlement
   log "Step 3b: Executing TBFF settlement..."
   local settle_output
-  settle_output=$(npx tsx deploy-settler.ts --settle 2>&1)
+  settle_output=$(npx tsx "$settler_script" --settle 2>&1)
   echo "$settle_output"
 
   local settle_tx
@@ -213,7 +220,7 @@ act3_settle() {
   # 3b-post. Capture post-settle network state
   log "Step 3b-post: Capturing post-settle state..."
   local post_state
-  post_state=$(npx tsx deploy-settler.ts --status-json 2>/dev/null || echo '{"nodes":[]}')
+  post_state=$(npx tsx "$settler_script" --status-json 2>/dev/null || echo '{"nodes":[]}')
   echo "$post_state" | jq -r '.nodes[] | "  \(.label): balance=\(.balance) threshold=\(.threshold)"'
 
   # Build node_balances array from pre/post state
@@ -399,12 +406,42 @@ act4_pool() {
   log "Step 4a: Pool status..."
   npx tsx deploy-swap-pool.ts --status 2>&1
 
-  # 4b. Try a quote
-  log "Step 4b: Getting quote for 100 VCV → cUSD..."
+  # 4b. Check if pool has cUSD; if not, try to acquire some
+  local pool_cusd
+  pool_cusd=$(npx tsx deploy-swap-pool.ts --status 2>&1 | grep "cUSD in pool:" | awk '{print $4}' || echo "0.0")
+  if [ "$pool_cusd" = "0.0" ]; then
+    log "Pool has no cUSD — attempting to acquire..."
+    if npx tsx acquire-cusd.ts --amount 5 2>&1; then
+      npx tsx deploy-swap-pool.ts --deposit-cusd 5 2>&1
+    else
+      warn "Could not acquire cUSD — swap will be quote-only"
+    fi
+  fi
+
+  # 4c. Get quote for 100 VCV → cUSD
+  log "Step 4c: Getting quote for 100 VCV → cUSD..."
   local quote_output
   quote_output=$(npx tsx execute-swap.ts --quote 100 2>&1 || echo "Quote failed")
   echo "$quote_output"
   update_result "pool_quote" "$(echo "$quote_output" | grep "Quote:" | head -1 || echo "none")"
+
+  # 4d. Execute real swap if pool has cUSD
+  pool_cusd=$(npx tsx deploy-swap-pool.ts --status 2>&1 | grep "cUSD in pool:" | awk '{print $4}' || echo "0.0")
+  if [ "$pool_cusd" != "0.0" ]; then
+    log "Step 4d: Executing real swap: 100 VCV → cUSD..."
+    local swap_output
+    swap_output=$(npx tsx execute-swap.ts --swap 100 2>&1 || echo "Swap failed")
+    echo "$swap_output"
+    local swap_tx
+    swap_tx=$(echo "$swap_output" | grep "^TX:" | head -1 | awk '{print $2}')
+    update_result "swap_tx" "${swap_tx:-failed}"
+    local swap_event
+    swap_event=$(echo "$swap_output" | grep "Out:" | head -1 || echo "")
+    update_result "swap_result" "${swap_event:-no_event}"
+  else
+    warn "Pool still has no cUSD — skipping real swap"
+    update_result "swap_tx" "skipped_no_cusd"
+  fi
 
   log "Act 4 complete"
 }

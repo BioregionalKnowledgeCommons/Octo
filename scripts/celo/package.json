@@ -11,8 +11,11 @@
     "transcribe": "npx tsx transcribe-and-extract.ts",
     "agent-commit": "npx tsx agent-self-commit.ts",
     "deploy-demo-settler": "npx tsx deploy-demo-settler.ts",
+    "deploy-multi-settler": "npx tsx deploy-multi-settler.ts",
+    "multi-settler-status": "npx tsx deploy-multi-settler.ts --status",
     "deploy-pool": "npx tsx deploy-swap-pool.ts",
     "pool-status": "npx tsx deploy-swap-pool.ts --status",
+    "acquire-cusd": "npx tsx acquire-cusd.ts",
     "swap": "npx tsx execute-swap.ts",
     "demo": "bash demo-full-loop.sh"
   },

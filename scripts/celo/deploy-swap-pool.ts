@@ -467,6 +467,32 @@ async function depositVcv(amount: string): Promise<void> {
   console.log(`TX: ${depositTx.hash}`);
 }
 
+// --- Deposit cUSD ---
+
+async function depositCusd(amount: string): Promise<void> {
+  const poolAddress = process.env.SWAP_POOL_ADDRESS;
+  if (!poolAddress) {
+    console.error("Error: SWAP_POOL_ADDRESS must be set in .env");
+    process.exit(1);
+  }
+
+  const signer = getSigner();
+  const cusdToken = new ethers.Contract(CUSD_ADDRESS, ERC20_APPROVE_ABI, signer);
+  const pool = new ethers.Contract(poolAddress, SWAP_POOL_ABI, signer);
+
+  const depositAmount = ethers.parseUnits(amount, 18); // cUSD has 18 decimals
+  console.log(`\nDepositing ${amount} cUSD into pool ${poolAddress}...`);
+
+  const approveTx = await cusdToken.approve(poolAddress, depositAmount);
+  await approveTx.wait();
+  console.log("Approved");
+
+  const depositTx = await pool.deposit(CUSD_ADDRESS, depositAmount);
+  const receipt = await depositTx.wait();
+  console.log(`Deposited in block ${receipt.blockNumber}`);
+  console.log(`TX: ${depositTx.hash}`);
+}
+
 // --- Main ---
 
 async function main() {
@@ -474,6 +500,13 @@ async function main() {
 
   if (args.includes("--status")) {
     await status();
+    return;
+  }
+
+  if (args.includes("--deposit-cusd")) {
+    const amountIdx = args.indexOf("--deposit-cusd") + 1;
+    const amount = args[amountIdx] || "5";
+    await depositCusd(amount);
     return;
   }
 
