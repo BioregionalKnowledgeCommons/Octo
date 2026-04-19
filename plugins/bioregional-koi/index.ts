@@ -167,7 +167,7 @@ function renderProposal(state: PendingCrawlState): string {
 
 function applyPendingCommand(state: PendingCrawlState, text: string): string {
   const trimmed = text.trim();
-  const dropMatch = trimmed.match(/^drop\s+(\d+)$/i);
+  const dropMatch = trimmed.match(/^\/?drop\s+(\d+)$/i);
   if (dropMatch) {
     const idx = Number(dropMatch[1]);
     if (!state.proposalOverrides.dropped_entity_indices.includes(idx)) {
@@ -175,7 +175,7 @@ function applyPendingCommand(state: PendingCrawlState, text: string): string {
     }
     return renderProposal(state);
   }
-  const renameMatch = trimmed.match(/^rename\s+(\d+)\s+(.+)$/i);
+  const renameMatch = trimmed.match(/^\/?rename\s+(\d+)\s+(.+)$/i);
   if (renameMatch) {
     const idx = Number(renameMatch[1]);
     const newName = renameMatch[2].trim();
@@ -185,7 +185,7 @@ function applyPendingCommand(state: PendingCrawlState, text: string): string {
     };
     return renderProposal(state);
   }
-  const editMatch = trimmed.match(/^edit\s+(\d+)\s+([a-z_]+)\s*:\s*(.+)$/i);
+  const editMatch = trimmed.match(/^\/?edit\s+(\d+)\s+([a-z_]+)\s*:\s*(.+)$/i);
   if (editMatch) {
     const idx = Number(editMatch[1]);
     const field = editMatch[2].toLowerCase();
@@ -249,17 +249,17 @@ async function initializeTelegramCrawl(api: OpenClawPluginApi) {
   }
 
   api.registerCommand({
-    name: "crawl-site",
+    name: "crawl_site",
     description: "Start an agentic site crawl in Telegram and manage the resulting proposal in-thread.",
     acceptsArgs: true,
     requireAuth: true,
     handler: async (ctx) => {
       if (ctx.channel !== "telegram") {
-        return { text: "/crawl-site is only wired for Telegram in Phase 4.", isError: true };
+        return { text: "/crawl_site is only wired for Telegram in Phase 4.", isError: true };
       }
       const args = String(ctx.args || "").trim();
       if (!args) {
-        return { text: "Usage: /crawl-site <url> [instruction]", isError: true };
+        return { text: "Usage: /crawl_site <url> [instruction]", isError: true };
       }
       const [url, ...rest] = args.split(/\s+/);
       const instruction = rest.join(" ").trim();
@@ -329,37 +329,47 @@ async function initializeTelegramCrawl(api: OpenClawPluginApi) {
     pending.replyToMessageId = replyToMessageId;
     const text = String(event.content || "").trim();
     if (!text) return;
-    const auth = buildTelegramAuth(api, event.from);
-    if (/^cancel$/i.test(text)) {
-      dropPending(pending);
-      await sendTelegramThreadMessage(api, pending, "Cancelled pending crawl proposal.");
-      return;
-    }
-    if (/^approve$/i.test(text)) {
-      const commitBody = {
-        proposal_overrides: pending.proposalOverrides,
-        extra_relationships: pending.extraRelationships,
-      };
-      const result = await koiRequestForApi(
-        api,
-        `/web/crawl-jobs/${pending.jobId}/commit`,
-        "POST",
-        commitBody,
-        auth.headers,
-      );
-      dropPending(pending);
+
+    try {
+      const auth = buildTelegramAuth(api, event.from);
+      if (/^\/?cancel$/i.test(text)) {
+        dropPending(pending);
+        await sendTelegramThreadMessage(api, pending, "Cancelled pending crawl proposal.");
+        return;
+      }
+      if (/^\/?approve(?:\s+\d+)?$/i.test(text)) {
+        const commitBody = {
+          proposal_overrides: pending.proposalOverrides,
+          extra_relationships: pending.extraRelationships,
+        };
+        const result = await koiRequestForApi(
+          api,
+          `/web/crawl-jobs/${pending.jobId}/commit`,
+          "POST",
+          commitBody,
+          auth.headers,
+        );
+        dropPending(pending);
+        await sendTelegramThreadMessage(
+          api,
+          pending,
+          `Commit ${result.status}: committed=${(result.committed || []).length}, skipped=${(result.skipped || []).length}, errors=${(result.errors || []).length}`,
+        );
+        return;
+      }
+      const response = applyPendingCommand(pending, text);
+      await sendTelegramThreadMessage(api, pending, response);
+    } catch (error) {
+      api.logger.error(`Telegram crawl reply handling failed: ${error instanceof Error ? error.message : String(error)}`);
       await sendTelegramThreadMessage(
         api,
         pending,
-        `Commit ${result.status}: committed=${(result.committed || []).length}, skipped=${(result.skipped || []).length}, errors=${(result.errors || []).length}`,
+        `Crawl action failed: ${error instanceof Error ? error.message : String(error)}`,
       );
-      return;
     }
-    const response = applyPendingCommand(pending, text);
-    await sendTelegramThreadMessage(api, pending, response);
   });
 
-  api.logger.info("Registered Telegram crawl-site command + reply hook");
+  api.logger.info("Registered Telegram crawl_site command + reply hook");
 }
 
 async function resolveToUri(nameOrUri: string): Promise<string> {
