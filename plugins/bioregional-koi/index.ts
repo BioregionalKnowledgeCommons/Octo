@@ -1,8 +1,30 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 
+import { createHmac } from "node:crypto";
 import * as nodePath from "node:path";
 
 const KOI_API = process.env.KOI_API_ENDPOINT || "http://127.0.0.1:8351";
+const CRAWL_PROGRESS_POLL_MS = 5000;
+const pendingCrawls = new Map<string, PendingCrawlState>();
+
+type PendingCrawlState = {
+  jobId: number;
+  submittedBy: string;
+  url: string;
+  instruction?: string;
+  chatTarget: string;
+  threadId?: number;
+  replyToMessageId?: number;
+  proposalOverrides: {
+    dropped_entity_indices: number[];
+    entity_edits: Record<number, { name?: string; description?: string; metadata?: Record<string, unknown> }>;
+    dropped_relationship_indices: number[];
+  };
+  extraRelationships: Array<{ from: number; predicate: string; to: string }>;
+  proposal?: any;
+  lastProgressKey?: string;
+};
+
 function getVaultPath(): string {
   const p = process.env.VAULT_PATH;
   if (!p) throw new Error("VAULT_PATH environment variable must be set");
@@ -34,6 +56,312 @@ async function koiRequest(path: string, method = "GET", body?: any) {
   return res.json();
 }
 
+function getPluginValue(api: OpenClawPluginApi, key: string, envKey?: string): string | undefined {
+  const fromPlugin = api.pluginConfig?.[key];
+  if (typeof fromPlugin === "string" && fromPlugin.trim()) return fromPlugin.trim();
+  const envValue = process.env[envKey || key];
+  return envValue && envValue.trim() ? envValue.trim() : undefined;
+}
+
+function getApiBase(api: OpenClawPluginApi): string {
+  return getPluginValue(api, "apiEndpoint", "KOI_API_ENDPOINT") || KOI_API;
+}
+
+async function koiRequestForApi(
+  api: OpenClawPluginApi,
+  path: string,
+  method = "GET",
+  body?: any,
+  headers?: Record<string, string>,
+) {
+  const url = `${getApiBase(api)}${path}`;
+  const opts: RequestInit = {
+    method,
+    headers: { "Content-Type": "application/json", ...(headers || {}) },
+  };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  const res = await fetch(url, opts);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`KOI API ${method} ${path} failed (${res.status}): ${text}`);
+  }
+  return res.json();
+}
+
+function normalizeTelegramSenderId(senderId: string | undefined): string {
+  const digits = String(senderId || "").match(/\d+/g)?.join("") || "";
+  if (!digits) throw new Error("Telegram senderId missing or non-numeric");
+  return `tg${digits}`;
+}
+
+function buildTelegramAuth(api: OpenClawPluginApi, senderId: string | undefined) {
+  const token = getPluginValue(api, "crawlTokenTelegram", "CRAWL_TOKEN_TELEGRAM");
+  const secret = getPluginValue(api, "crawlSecretTelegram", "CRAWL_SECRET_TELEGRAM");
+  if (!token || !secret) {
+    throw new Error("Telegram crawl auth is not configured");
+  }
+  const identity = normalizeTelegramSenderId(senderId);
+  const ts = Math.floor(Date.now() / 1000);
+  const signature = createHmac("sha256", secret).update(`${identity}|${ts}`).digest("hex");
+  return {
+    submittedBy: `telegram:${identity}`,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "X-Identity-Claim": `${identity}|${ts}|${signature}`,
+    },
+  };
+}
+
+function buildThreadKeys(channel: string, ids: Array<string | number | undefined | null>, threadId?: number): string[] {
+  const out = new Set<string>();
+  for (const raw of ids) {
+    if (raw === undefined || raw === null) continue;
+    const value = String(raw).trim();
+    if (!value) continue;
+    out.add(`${channel}:${value}:${threadId || 0}`);
+  }
+  return Array.from(out);
+}
+
+function storePending(keys: string[], state: PendingCrawlState) {
+  for (const key of keys) pendingCrawls.set(key, state);
+}
+
+function findPending(keys: string[]): PendingCrawlState | undefined {
+  for (const key of keys) {
+    const pending = pendingCrawls.get(key);
+    if (pending) return pending;
+  }
+  return undefined;
+}
+
+function dropPending(state: PendingCrawlState) {
+  for (const [key, value] of Array.from(pendingCrawls.entries())) {
+    if (value === state) pendingCrawls.delete(key);
+  }
+}
+
+function renderProposal(state: PendingCrawlState): string {
+  const proposal = state.proposal;
+  const entities = Array.isArray(proposal?.entities) ? proposal.entities : [];
+  const relationships = Array.isArray(proposal?.relationships) ? proposal.relationships : [];
+  const dropped = new Set(state.proposalOverrides.dropped_entity_indices || []);
+  const lines = [
+    `Crawl proposal for ${state.url}`,
+    `Entities:`,
+  ];
+  for (const entity of entities) {
+    const idx = Number(entity.index);
+    if (dropped.has(idx)) continue;
+    const edit = state.proposalOverrides.entity_edits[idx] || {};
+    const name = edit.name || entity.name;
+    const description = edit.description || entity.description || "";
+    lines.push(`${idx}. ${name} (${entity.type})${description ? ` — ${description}` : ""}`);
+  }
+  if (relationships.length > 0) {
+    lines.push(`Relationships: ${relationships.length}`);
+  }
+  lines.push("Reply with: approve / cancel / drop N / edit N field: value / rename N new name");
+  return lines.join("\n");
+}
+
+function applyPendingCommand(state: PendingCrawlState, text: string): string {
+  const trimmed = text.trim();
+  const dropMatch = trimmed.match(/^drop\s+(\d+)$/i);
+  if (dropMatch) {
+    const idx = Number(dropMatch[1]);
+    if (!state.proposalOverrides.dropped_entity_indices.includes(idx)) {
+      state.proposalOverrides.dropped_entity_indices.push(idx);
+    }
+    return renderProposal(state);
+  }
+  const renameMatch = trimmed.match(/^rename\s+(\d+)\s+(.+)$/i);
+  if (renameMatch) {
+    const idx = Number(renameMatch[1]);
+    const newName = renameMatch[2].trim();
+    state.proposalOverrides.entity_edits[idx] = {
+      ...(state.proposalOverrides.entity_edits[idx] || {}),
+      name: newName,
+    };
+    return renderProposal(state);
+  }
+  const editMatch = trimmed.match(/^edit\s+(\d+)\s+([a-z_]+)\s*:\s*(.+)$/i);
+  if (editMatch) {
+    const idx = Number(editMatch[1]);
+    const field = editMatch[2].toLowerCase();
+    const value = editMatch[3].trim();
+    if (!["name", "description"].includes(field)) {
+      return "Only `name` and `description` are editable in Phase 4.";
+    }
+    state.proposalOverrides.entity_edits[idx] = {
+      ...(state.proposalOverrides.entity_edits[idx] || {}),
+      [field]: value,
+    };
+    return renderProposal(state);
+  }
+  return "Pending crawl commands: approve / cancel / drop N / edit N field: value / rename N new name";
+}
+
+async function sendTelegramThreadMessage(api: OpenClawPluginApi, state: PendingCrawlState, text: string) {
+  await api.runtime.channel.telegram.sendMessageTelegram(state.chatTarget, text, {
+    messageThreadId: state.threadId,
+    replyToMessageId: state.replyToMessageId,
+  });
+}
+
+async function pollCrawlJob(api: OpenClawPluginApi, headers: Record<string, string>, state: PendingCrawlState) {
+  while (true) {
+    const data = await koiRequestForApi(api, `/web/crawl-jobs/${state.jobId}`, "GET", undefined, headers);
+    const progress = data.progress || {};
+    const progressKey = JSON.stringify({
+      status: data.status,
+      pages: progress.pages_visited,
+      entities: progress.entities_so_far,
+      cost: data.cost_usd,
+    });
+    if (progressKey !== state.lastProgressKey && data.status === "running") {
+      state.lastProgressKey = progressKey;
+      await sendTelegramThreadMessage(
+        api,
+        state,
+        `Crawl in progress: ${progress.pages_visited || 0} pages, ${progress.entities_so_far || 0} entities, $${Number(data.cost_usd || 0).toFixed(4)}`
+      );
+    }
+    if (["done", "failed", "cancelled", "interrupted", "committed", "partially_committed"].includes(String(data.status))) {
+      if (data.status !== "done" && data.status !== "partially_committed") {
+        dropPending(state);
+        await sendTelegramThreadMessage(api, state, `Crawl finished with status ${data.status}${data.error ? `: ${data.error}` : ""}`);
+        return;
+      }
+      state.proposal = data.result;
+      await sendTelegramThreadMessage(api, state, renderProposal(state));
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, CRAWL_PROGRESS_POLL_MS));
+  }
+}
+
+async function initializeTelegramCrawl(api: OpenClawPluginApi) {
+  const diagnostics = await koiRequestForApi(api, "/diagnostics/config");
+  if (diagnostics.agentic_crawl_available !== true) {
+    api.logger.info("crawl-site command not registered: agentic crawl unavailable");
+    return;
+  }
+
+  api.registerCommand({
+    name: "crawl-site",
+    description: "Start an agentic site crawl in Telegram and manage the resulting proposal in-thread.",
+    acceptsArgs: true,
+    requireAuth: true,
+    handler: async (ctx) => {
+      if (ctx.channel !== "telegram") {
+        return { text: "/crawl-site is only wired for Telegram in Phase 4.", isError: true };
+      }
+      const args = String(ctx.args || "").trim();
+      if (!args) {
+        return { text: "Usage: /crawl-site <url> [instruction]", isError: true };
+      }
+      const [url, ...rest] = args.split(/\s+/);
+      const instruction = rest.join(" ").trim();
+      const auth = buildTelegramAuth(api, ctx.senderId);
+      const chatTarget = String(ctx.to || ctx.channelId || ctx.from || ctx.senderId || "");
+      if (!chatTarget) {
+        return { text: "Unable to determine Telegram chat target for crawl replies.", isError: true };
+      }
+      const threadId = ctx.messageThreadId;
+      const replyToMessageId = undefined;
+      const parsed = instruction
+        ? await koiRequestForApi(api, "/tools/parse-relate-clause", "POST", { instruction }, auth.headers)
+        : { targets: [] };
+      const extraRelationships = Array.isArray(parsed.targets)
+        ? parsed.targets.map((target: any) => ({
+            from: 0,
+            predicate: target.predicate_hint || "related_to",
+            to: target.label,
+          }))
+        : [];
+      const enqueue = await koiRequestForApi(
+        api,
+        "/web/crawl-agentic",
+        "POST",
+        { url, goal: instruction || undefined },
+        auth.headers,
+      );
+      const state: PendingCrawlState = {
+        jobId: Number(enqueue.job_id),
+        submittedBy: auth.submittedBy,
+        url,
+        instruction: instruction || undefined,
+        chatTarget,
+        threadId,
+        replyToMessageId,
+        proposalOverrides: {
+          dropped_entity_indices: [],
+          entity_edits: {},
+          dropped_relationship_indices: [],
+        },
+        extraRelationships,
+      };
+      storePending(
+        buildThreadKeys("telegram", [chatTarget, ctx.to, ctx.from, ctx.channelId, ctx.senderId], threadId),
+        state,
+      );
+      void pollCrawlJob(api, auth.headers, state).catch((error) => {
+        api.logger.error(`crawl-site polling failed: ${error instanceof Error ? error.message : String(error)}`);
+      });
+      return { text: `Started crawl job ${state.jobId} for ${url}. I’ll post progress in this thread.` };
+    },
+  });
+
+  api.on("message_received", async (event, ctx) => {
+    if (!String(ctx.channelId || "").includes("telegram")) return;
+    const metadata = (event.metadata || {}) as Record<string, unknown>;
+    const threadId = Number(
+      metadata.messageThreadId ||
+        metadata.message_thread_id ||
+        metadata.threadId ||
+        0,
+    ) || undefined;
+    const replyToMessageId = Number(metadata.messageId || metadata.message_id || 0) || undefined;
+    const keys = buildThreadKeys("telegram", [ctx.conversationId, ctx.channelId, metadata.chatId, event.from], threadId);
+    const pending = findPending(keys);
+    if (!pending) return;
+    pending.replyToMessageId = replyToMessageId;
+    const text = String(event.content || "").trim();
+    if (!text) return;
+    const auth = buildTelegramAuth(api, event.from);
+    if (/^cancel$/i.test(text)) {
+      dropPending(pending);
+      await sendTelegramThreadMessage(api, pending, "Cancelled pending crawl proposal.");
+      return;
+    }
+    if (/^approve$/i.test(text)) {
+      const commitBody = {
+        proposal_overrides: pending.proposalOverrides,
+        extra_relationships: pending.extraRelationships,
+      };
+      const result = await koiRequestForApi(
+        api,
+        `/web/crawl-jobs/${pending.jobId}/commit`,
+        "POST",
+        commitBody,
+        auth.headers,
+      );
+      dropPending(pending);
+      await sendTelegramThreadMessage(
+        api,
+        pending,
+        `Commit ${result.status}: committed=${(result.committed || []).length}, skipped=${(result.skipped || []).length}, errors=${(result.errors || []).length}`,
+      );
+      return;
+    }
+    const response = applyPendingCommand(pending, text);
+    await sendTelegramThreadMessage(api, pending, response);
+  });
+
+  api.logger.info("Registered Telegram crawl-site command + reply hook");
+}
+
 async function resolveToUri(nameOrUri: string): Promise<string> {
   // If it already looks like a URI, return as-is
   if (nameOrUri.startsWith("orn:")) return nameOrUri;
@@ -51,6 +379,10 @@ const bioregionalKoiPlugin = {
   name: "Bioregional KOI",
   description: "Knowledge graph tools for bioregional knowledge commoning",
   register(api: OpenClawPluginApi) {
+    void initializeTelegramCrawl(api).catch((error) => {
+      api.logger.error(`Failed to initialize Telegram crawl flow: ${error instanceof Error ? error.message : String(error)}`);
+    });
+
     // resolve_entity — disambiguate a name to a canonical entity
     api.registerTool(
       {

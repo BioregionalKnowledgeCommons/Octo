@@ -11,11 +11,19 @@
       "vaultPath": {
         "type": "string",
         "default": "/root/.openclaw/workspace/vault"
+      },
+      "crawlTokenTelegram": {
+        "type": "string"
+      },
+      "crawlSecretTelegram": {
+        "type": "string"
       }
     }
   },
   "uiHints": {
     "apiEndpoint": { "label": "KOI API Endpoint" },
-    "vaultPath": { "label": "Vault Path" }
+    "vaultPath": { "label": "Vault Path" },
+    "crawlTokenTelegram": { "label": "Crawl Token (Telegram)", "sensitive": true },
+    "crawlSecretTelegram": { "label": "Crawl Secret (Telegram)", "sensitive": true }
   }
 }
