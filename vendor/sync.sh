@@ -47,5 +47,18 @@ rsync -a --delete \
 
 if [ "$CLEANUP_CANONICAL" = "true" ]; then rm -rf "$CANONICAL_REPO"; fi
 
+# Overlay Octo's canonical BKC ontology on top of the vendored copy.
+# Octo is the source of truth for bkc-ontology.jsonld; this ensures the
+# deployed koi-api loads the current Octo ontology even if the pinned
+# koi-processor commit is older than the latest ontology edit.
+OCTO_ONTOLOGY="$SCRIPT_DIR/../ontology/bkc-ontology.jsonld"
+if [ -f "$OCTO_ONTOLOGY" ]; then
+    mkdir -p "$VENDOR_DIR/api/ontology"
+    cp "$OCTO_ONTOLOGY" "$VENDOR_DIR/api/ontology/bkc-ontology.jsonld"
+    echo "Ontology overlaid from $OCTO_ONTOLOGY"
+else
+    echo "WARNING: $OCTO_ONTOLOGY not found; vendored ontology (if any) left untouched"
+fi
+
 echo "Vendored koi-processor at $PIN"
 echo "Files synced to $VENDOR_DIR"

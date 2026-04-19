@@ -84,7 +84,7 @@ Each node runs the same KOI API codebase with its own database, vault, and ident
 
 ## BKC Ontology
 
-The formal ontology (`ontology/bkc-ontology.jsonld`) defines 9 entity types and 17 predicates for bioregional knowledge commoning:
+The formal ontology (`ontology/bkc-ontology.jsonld`) defines 25 entity types and 39 predicates for bioregional knowledge commoning:
 
 ### Entity Types
 

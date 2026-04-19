@@ -17,9 +17,9 @@
       "@type": "owl:Ontology",
       "rdfs:label": "BKC Ontology",
       "rdfs:comment": "Bioregional Knowledge Commoning ontology for Octo's knowledge graph",
-      "owl:versionInfo": "1.2.0",
+      "owl:versionInfo": "1.3.0",
       "dcterms:created": { "@type": "xsd:date", "@value": "2026-02-08" },
-      "dcterms:modified": { "@type": "xsd:date", "@value": "2026-03-03" }
+      "dcterms:modified": { "@type": "xsd:date", "@value": "2026-04-18" }
     },
 
     { "@id": "bkc:Practice", "@type": "owl:Class",
@@ -237,6 +237,95 @@
       "rdfs:label": "disputes",
       "rdfs:domain": [{ "@id": "schema:Person" }, { "@id": "schema:Organization" }],
       "rdfs:range": { "@id": "bkc:Commitment" },
-      "rdfs:comment": "Formal dispute entry against a Commitment. Transitions state to DISPUTED pending resolution. Implements the contestability requirement of Sangat-grade commitment infrastructure." }
+      "rdfs:comment": "Formal dispute entry against a Commitment. Transitions state to DISPUTED pending resolution. Implements the contestability requirement of Sangat-grade commitment infrastructure." },
+
+    { "@id": "schema:Person", "@type": "owl:Class",
+      "rdfs:label": "Person",
+      "rdfs:comment": "A natural person. Aliases the schema.org Person class." },
+
+    { "@id": "schema:Organization", "@type": "owl:Class",
+      "rdfs:label": "Organization",
+      "rdfs:comment": "An organization such as a nonprofit, company, or collective. Aliases the schema.org Organization class." },
+
+    { "@id": "schema:Project", "@type": "owl:Class",
+      "rdfs:label": "Project",
+      "rdfs:comment": "A named initiative or program of work. Aliases the schema.org Project class. Per BKC convention, site 'programs' map to Project with metadata.kind='program'." },
+
+    { "@id": "schema:Place", "@type": "owl:Class",
+      "rdfs:label": "Location",
+      "rdfs:comment": "A geographic location or place. Labelled 'Location' in the BKC type system; aliases schema:Place." },
+
+    { "@id": "skos:Concept", "@type": "owl:Class",
+      "rdfs:label": "Concept",
+      "rdfs:comment": "A unit of thought, used for topic-like entities. Aliases skos:Concept." },
+
+    { "@id": "schema:Meeting", "@type": "owl:Class",
+      "rdfs:label": "Meeting",
+      "rdfs:comment": "A documented meeting or gathering. Aliases the schema.org Meeting class." },
+
+    { "@id": "bkc:affiliated_with", "@type": "owl:ObjectProperty",
+      "rdfs:label": "affiliated with",
+      "rdfs:comment": "Person or sub-org is affiliated with an Organization (employment, membership, association)." },
+
+    { "@id": "bkc:attended", "@type": "owl:ObjectProperty",
+      "rdfs:label": "attended",
+      "rdfs:domain": { "@id": "schema:Person" },
+      "rdfs:range": { "@id": "schema:Meeting" },
+      "rdfs:comment": "Person was present at a Meeting." },
+
+    { "@id": "bkc:collaborates_with", "@type": "owl:ObjectProperty",
+      "rdfs:label": "collaborates with",
+      "rdfs:comment": "Two Organizations or People collaborate on shared work. Symmetric in practice." },
+
+    { "@id": "bkc:founded", "@type": "owl:ObjectProperty",
+      "rdfs:label": "founded",
+      "rdfs:domain": { "@id": "schema:Person" },
+      "rdfs:range": { "@id": "schema:Organization" },
+      "rdfs:comment": "Person founded an Organization. Inverse of has_founder." },
+
+    { "@id": "bkc:has_founder", "@type": "owl:ObjectProperty",
+      "rdfs:label": "has founder",
+      "rdfs:domain": { "@id": "schema:Organization" },
+      "rdfs:range": { "@id": "schema:Person" },
+      "rdfs:comment": "Organization has a founder Person. Inverse of founded." },
+
+    { "@id": "bkc:has_project", "@type": "owl:ObjectProperty",
+      "rdfs:label": "has project",
+      "rdfs:domain": { "@id": "schema:Organization" },
+      "rdfs:range": { "@id": "schema:Project" },
+      "rdfs:comment": "Organization stewards or runs a Project." },
+
+    { "@id": "bkc:involves_organization", "@type": "owl:ObjectProperty",
+      "rdfs:label": "involves organization",
+      "rdfs:range": { "@id": "schema:Organization" },
+      "rdfs:comment": "An event, project, or case involves an Organization in a non-ownership role." },
+
+    { "@id": "bkc:involves_person", "@type": "owl:ObjectProperty",
+      "rdfs:label": "involves person",
+      "rdfs:range": { "@id": "schema:Person" },
+      "rdfs:comment": "An event, project, or case involves a Person in a non-ownership role." },
+
+    { "@id": "bkc:knows", "@type": "owl:ObjectProperty",
+      "rdfs:label": "knows",
+      "rdfs:domain": { "@id": "schema:Person" },
+      "rdfs:range": { "@id": "schema:Person" },
+      "rdfs:comment": "Person knows another Person. Used sparingly; prefer affiliated_with or collaborates_with when more specific." },
+
+    { "@id": "bkc:located_in", "@type": "owl:ObjectProperty",
+      "rdfs:label": "located in",
+      "rdfs:range": { "@id": "schema:Place" },
+      "rdfs:comment": "Subject entity is located in a Place (geographic containment)." },
+
+    { "@id": "skos:broader", "@type": "owl:ObjectProperty",
+      "rdfs:label": "broader",
+      "rdfs:comment": "SKOS broader: the related concept has a broader meaning (Salish Sea broader Cascadia)." },
+
+    { "@id": "skos:narrower", "@type": "owl:ObjectProperty",
+      "rdfs:label": "narrower",
+      "rdfs:comment": "SKOS narrower: the related concept has a narrower meaning. Inverse of broader." },
+
+    { "@id": "skos:related", "@type": "owl:ObjectProperty",
+      "rdfs:label": "related to",
+      "rdfs:comment": "SKOS related: generic associative relation when no more specific predicate applies." }
   ]
 }
