@@ -64,7 +64,11 @@ deploy_node() {
     if [ "$DRY_RUN" = true ]; then
         echo "[DRY RUN] Would rsync $VENDOR_KOI/api/ to $host:$path/api/"
         echo "[DRY RUN] Would rsync $VENDOR_KOI/migrations/ to $host:$path/migrations/"
+        echo "[DRY RUN] Would rsync $VENDOR_KOI/requirements.txt to $host:$path/requirements.txt"
         echo "[DRY RUN] Would run pending migrations on $db"
+        if [ "$name" = "octo" ] || [ "$name" = "fr" ] || [ "$name" = "gv" ]; then
+            echo "[DRY RUN] Would run pip install -r $path/requirements.txt in $path/venv"
+        fi
         echo "[DRY RUN] Would restart $service"
         echo "[DRY RUN] Would verify health"
         return 0
@@ -90,6 +94,7 @@ deploy_node() {
         --exclude='config/' \
         "$VENDOR_KOI/api/" "$host:$path/api/"
     rsync -avz "$VENDOR_KOI/migrations/" "$host:$path/migrations/"
+    rsync -avz "$VENDOR_KOI/requirements.txt" "$host:$path/requirements.txt"
 
     # Fix permissions for GV (runs as koi user)
     if [ "$name" = "gv" ]; then
@@ -211,6 +216,16 @@ for e in m['migrations']:
         echo "Rolled back $name to previous version"
         return 1
     }
+
+    # Keep the target venv in sync with the vendored code before restart.
+    if [ "$name" = "octo" ] || [ "$name" = "fr" ] || [ "$name" = "gv" ]; then
+        echo "Syncing Python dependencies in target venv..."
+        local pip_cmd="$path/venv/bin/pip install -r $path/requirements.txt"
+        if [ "$name" = "gv" ]; then
+            pip_cmd="sudo -u koi $pip_cmd"
+        fi
+        ssh "$host" "$pip_cmd"
+    fi
 
     # Restart service
     echo "Restarting $service..."
