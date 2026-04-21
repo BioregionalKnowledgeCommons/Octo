@@ -198,6 +198,10 @@ Octo's KOI runtime code comes from the canonical repo (`RegenAI/koi-processor`) 
 ./deploy.sh --target gv --skip-sync
 ```
 
+Ops note (2026-04-20): the deferred Peninsula municipality embedding backfill was skipped after `GET /health` on poly reported `busy: true`; retry only in a later idle window, not via tight-loop polling.
+
+Deploy procedure note: `deploy.sh` now syncs `requirements.txt` and runs `pip install -r requirements.txt` inside the target venv on every Octo/FR/GV deploy before service restart.
+
 ### Migration governance
 Migrations are **manifest-driven** — only migrations listed in `migrations/baselines/${db}.json` are applied to each node. Each entry has a canonical `migration_id` (e.g. `bkc:039_koi_net_events`) and expected `sha256` checksum. Missing files or checksum mismatches halt the deploy with rollback.
 
@@ -569,3 +573,4 @@ curl -s http://127.0.0.1:8354/health
 | `a56e7930` | 2026-03-05 | Vault Auto-Notes | Auto-create vault .md notes during web ingest. `vault_note_utils.py`, `backfill_vault_notes.py`, web_router.py updated. Backfilled 16 entities. All 3 nodes deployed (pin `a54b626e`). |
 | `0d84c823` | 2026-03-06 | MediaWiki Import v1 | Salish Sea Wiki graph densification: parser, dump reader, bulk importer, migration 063. Pilot 50 pages → 319 entities created, 565 edges. Entity count 70→~1,005. Three confidence tiers + editorial edges. Deployed to Octo production. |
 | `d7a4d981` | 2026-03-06 | MediaWiki v3 Deploy | Live sync sensor: commit v3 on feat/mediawiki-import, merge to regen-prod, bump vendor pin to `698b5042`, deploy to Octo. Sensor polling every 5 min. 2,722 entities, 5,123 vault pages live on salishsee.life. |
+| | 2026-04-19/20 | Phase 4 live deploy + rename guard | Phase 4 end-to-end deploy (koi-processor `b372f66c`): agentic crawl flag flipped, canary job 1 + peninsula job 7 committed, 3 Phase-1/2 hotfixes (raw_html, proxy retry, deferred OCR), rename-time fuzzy false-merge defect remediated (Part A SQL: +7 municipality RIDs, +6 edges, 1 retarget; Part B code: skip_fuzzy guard on renamed unresolved entities). Phase 4 closed from production-safety standpoint. |
