@@ -8,6 +8,7 @@ import * as os from "node:os";
 const OPENAI_API = "https://api.openai.com/v1/chat/completions";
 const KOI_API = process.env.KOI_API_ENDPOINT
   ?? `http://127.0.0.1:${process.env.KOI_API_PORT ?? "8351"}`;
+const KOI_CLAIMS_SERVICE_TOKEN = process.env.KOI_CLAIMS_SERVICE_TOKEN?.trim();
 const DEFAULT_MODEL = process.env.INTERVIEW_COMMONING_MODEL || process.env.GPT_MODEL || "gpt-4o-mini";
 
 type JsonMap = Record<string, any>;
@@ -286,10 +287,18 @@ function noteNameWithOrigin(title: string, bioregion?: string): string {
 }
 
 async function koiRequest(path: string, method = "GET", body?: unknown) {
+  const verb = method.toUpperCase();
   const url = `${KOI_API}${path}`;
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (verb !== "GET") {
+    if (!KOI_CLAIMS_SERVICE_TOKEN) {
+      throw new Error("KOI_CLAIMS_SERVICE_TOKEN must be set for KOI write requests");
+    }
+    headers.Authorization = `Bearer ${KOI_CLAIMS_SERVICE_TOKEN}`;
+  }
   const opts: RequestInit = {
-    method,
-    headers: { "Content-Type": "application/json" },
+    method: verb,
+    headers,
   };
   if (body !== undefined) opts.body = JSON.stringify(body);
   const res = await fetch(url, opts);
