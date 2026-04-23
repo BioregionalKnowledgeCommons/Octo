@@ -1,6 +1,7 @@
 import "dotenv/config";
 
 const KOI_BASE = process.env.KOI_API_BASE_URL || "http://localhost:8351";
+const KOI_CLAIMS_SERVICE_TOKEN = process.env.KOI_CLAIMS_SERVICE_TOKEN?.trim();
 
 interface CommitmentDef {
   title: string;
@@ -114,6 +115,16 @@ const AGENT_NEEDS: CommitmentDef[] = [
 
 // --- API Helpers ---
 
+function getKoiWriteHeaders(): Record<string, string> {
+  if (!KOI_CLAIMS_SERVICE_TOKEN) {
+    throw new Error("KOI_CLAIMS_SERVICE_TOKEN not set in .env");
+  }
+  return {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${KOI_CLAIMS_SERVICE_TOKEN}`,
+  };
+}
+
 async function resolveOrCreateEntity(
   name: string,
   type: string,
@@ -165,7 +176,7 @@ async function createCommitment(
 
   const resp = await fetch(`${KOI_BASE}/commitments/create`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getKoiWriteHeaders(),
     body: JSON.stringify({
       pledger_uri: pledgerUri,
       title: def.title,
@@ -188,7 +199,7 @@ async function createCommitment(
 async function verifyCommitment(rid: string): Promise<void> {
   const resp = await fetch(`${KOI_BASE}/commitments/${encodeURIComponent(rid)}/state`, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json" },
+    headers: getKoiWriteHeaders(),
     body: JSON.stringify({
       new_state: "VERIFIED",
       actor: "octo-agent",

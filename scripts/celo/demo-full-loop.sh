@@ -15,6 +15,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
 KOI_BASE="${KOI_API_BASE_URL:-http://localhost:8351}"
+KOI_CLAIMS_SERVICE_TOKEN="${KOI_CLAIMS_SERVICE_TOKEN:-}"
 RESULTS_FILE="/tmp/demo-full-loop-results.json"
 
 # Color output
@@ -26,6 +27,10 @@ NC='\033[0m'
 log()  { echo -e "${GREEN}[DEMO]${NC} $*"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
 fail() { echo -e "${RED}[FAIL]${NC} $*"; exit 1; }
+CLAIMS_AUTH_HEADER=()
+if [ -n "$KOI_CLAIMS_SERVICE_TOKEN" ]; then
+  CLAIMS_AUTH_HEADER=(-H "Authorization: Bearer ${KOI_CLAIMS_SERVICE_TOKEN}")
+fi
 
 # Initialize results
 echo '{}' > "$RESULTS_FILE"
@@ -62,6 +67,7 @@ check_prereqs() {
 
   # Check .env
   [ -f .env ] || fail ".env not found in $SCRIPT_DIR"
+  [ -n "$KOI_CLAIMS_SERVICE_TOKEN" ] || fail "KOI_CLAIMS_SERVICE_TOKEN not set in .env"
   log "Prerequisites: OK"
 }
 
@@ -92,6 +98,7 @@ act1_human() {
   local extract_result
   extract_result=$(curl -sf -X POST "$KOI_BASE/commitments/extract-from-transcript" \
     -H 'Content-Type: application/json' \
+    "${CLAIMS_AUTH_HEADER[@]}" \
     -d "$(jq -n --arg t "$transcript" '{
       document_text: $t,
       source_document: "demo-workshop-audio",
@@ -260,6 +267,7 @@ act3_settle() {
   local claim_resp
   claim_resp=$(curl -sf -X POST "$KOI_BASE/claims/claim-from-settlement" \
     -H 'Content-Type: application/json' \
+    "${CLAIMS_AUTH_HEADER[@]}" \
     -d "$(jq -n \
       --arg sid "$settle_tx" \
       --arg tx "$settle_tx" \
@@ -314,12 +322,12 @@ act3_settle() {
 
     # Prepare anchor (compute content hash)
     local prepare_resp
-    prepare_resp=$(curl -sf -X POST "$KOI_BASE/claims/${encoded_rid}/prepare-anchor" 2>/dev/null || echo '{"error":"prepare failed"}')
+    prepare_resp=$(curl -sf -X POST "$KOI_BASE/claims/${encoded_rid}/prepare-anchor" "${CLAIMS_AUTH_HEADER[@]}" 2>/dev/null || echo '{"error":"prepare failed"}')
     log "Prepare-anchor: $(echo "$prepare_resp" | jq -r '.content_hash // .error // "ok"' | head -c 40)"
 
     # Anchor
     local anchor_resp anchor_status
-    anchor_resp=$(curl -sf -w '\n%{http_code}' -X POST "$KOI_BASE/claims/${encoded_rid}/anchor" 2>/dev/null || echo -e '{"error":"anchor failed"}\n503')
+    anchor_resp=$(curl -sf -w '\n%{http_code}' -X POST "$KOI_BASE/claims/${encoded_rid}/anchor" "${CLAIMS_AUTH_HEADER[@]}" 2>/dev/null || echo -e '{"error":"anchor failed"}\n503')
     anchor_status=$(echo "$anchor_resp" | tail -1)
     local anchor_body
     anchor_body=$(echo "$anchor_resp" | sed '$d')
@@ -336,7 +344,7 @@ act3_settle() {
       while [ $reconcile_count -lt 6 ]; do
         sleep 5
         local reconcile_resp
-        reconcile_resp=$(curl -sf -X POST "$KOI_BASE/claims/${encoded_rid}/reconcile" 2>/dev/null || echo '{"status":"error"}')
+        reconcile_resp=$(curl -sf -X POST "$KOI_BASE/claims/${encoded_rid}/reconcile" "${CLAIMS_AUTH_HEADER[@]}" 2>/dev/null || echo '{"status":"error"}')
         local rec_status
         rec_status=$(echo "$reconcile_resp" | jq -r '.status // "error"')
         log "  Reconcile attempt $((reconcile_count + 1)): $rec_status"

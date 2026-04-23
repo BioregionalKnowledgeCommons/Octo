@@ -2,6 +2,7 @@ import "dotenv/config";
 
 // --- Config ---
 const KOI_BASE = process.env.KOI_API_BASE_URL || "http://localhost:8351";
+const KOI_CLAIMS_SERVICE_TOKEN = process.env.KOI_CLAIMS_SERVICE_TOKEN?.trim();
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 // --- Whisper Transcription ---
@@ -76,6 +77,16 @@ async function transcribeAudio(filePath: string): Promise<{ transcript: string; 
 
 // --- Extract Commitments via KOI API ---
 
+function getKoiWriteHeaders(): Record<string, string> {
+  if (!KOI_CLAIMS_SERVICE_TOKEN) {
+    throw new Error("KOI_CLAIMS_SERVICE_TOKEN not set in .env");
+  }
+  return {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${KOI_CLAIMS_SERVICE_TOKEN}`,
+  };
+}
+
 async function extractCommitments(
   transcript: string,
   sourceDocument: string,
@@ -86,7 +97,7 @@ async function extractCommitments(
 
   const resp = await fetch(`${KOI_BASE}/commitments/extract-from-transcript`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getKoiWriteHeaders(),
     body: JSON.stringify({
       document_text: transcript,
       source_document: sourceDocument,
